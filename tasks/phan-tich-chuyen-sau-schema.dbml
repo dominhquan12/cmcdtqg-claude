@@ -1,0 +1,318 @@
+// Schema đề xuất (v2) cho module "Phân tích chuyên sâu dự án" — dán vào https://dbdiagram.io để xem ERD.
+// Nguồn: schema_fixed.sql (đề xuất gốc từ đối tác) + đối chiếu với phan-tich-chuyen-sau-plan.md
+// và Mô tả logic công thức.xlsx. Đây KHÔNG phải copy nguyên schema_fixed.sql — đã chỉnh theo
+// các gap/lỗi phát hiện được (xem chú thích "MỚI" / "SỬA" trên từng bảng/cột).
+//
+// Các thay đổi lớn so với schema_fixed.sql gốc:
+//   1. Thêm da_xoa + đổi created_at/updated_at -> ngay_tao/ngay_sua theo convention BaseAudit (ptcb).
+//   2. Bỏ cột "linh_vuc" (trùng ma_nganh) trên dm_du_an; thêm dm_dia_ban thay free-text "dia_ban".
+//   3. bc_dinh_ky: ma_bao_cao NOT NULL UNIQUE, ngay_nop_bao_cao NOT NULL, đổi "loi_nhuan" ->
+//      "loi_nhuan_ky" + thêm "loi_nhuan_luy_ke", bỏ 2 cột JSONB không rõ mục đích
+//      (chi_tieu_tai_chinh_json/co_cau_von_json — trùng raw_json).
+//   4. tien_do_trang_thai: đổi giá trị enum sang snake_case, đổi "khoKhanVuongMac" -> "gap_kho_khan"
+//      để không trùng tên với cột text "kho_khan_vuong_mac" (2 khái niệm khác nhau, tên gốc dễ nhầm).
+//   5. bc_du_bao: thêm "nhan_du_bao" (text) cho 2 nhóm Tiến độ/Rủi ro — kết quả dự báo của 2 nhóm
+//      này là trạng thái/mức độ, không phải số, "gia_tri_du_bao" (numeric) không đủ.
+//   6. Enum hoá các cột "closed set" (danh_muc, muc_do, trang_thai_tuan_thu...).
+//   7. bc_rui_ro_chi_tiet.danh_muc & bc_chi_tieu_trung_binh.chi_tieu: đề xuất tham chiếu sang
+//      cb_nhom_chi_tieu/cb_chi_tieu (ĐÃ CÓ SẴN trong com.ai.ptcb) thay vì tự định nghĩa lại
+//      danh sách 5 nhóm chỉ tiêu ở một nơi khác — tránh 2 nguồn sự thật cho cùng 1 khái niệm.
+//   8. Thêm UNIQUE constraint còn thiếu: bc_rui_ro_chi_tiet(report_id, danh_muc),
+//      bc_tuan_thu_chi_tiet(report_id, nghia_vu_id); thêm report_id vào bc_tuan_thu_chi_tiet
+//      cho nhất quán với bc_rui_ro_chi_tiet.
+//   9. Bỏ VIEW vw_bc_dinh_ky_dashboard — tính tỷ_lệ_giải_ngân ở tầng Service (Java), không dùng
+//      DB view, theo convention Clean Architecture của repo.
+//
+// Các điểm CHƯA giải quyết được bằng DBML (cần xử lý ở migration Liquibase/Flyway thật):
+//   - CHECK constraint dạng biểu thức (gia_tri_diem BETWEEN 0-10, gia_tri_trung_binh >= 0)
+//     — DBML không hỗ trợ CHECK tuỳ ý, chỉ ghi chú lại trong note.
+//   - Cơ chế cập nhật các cột cache (ky_bao_cao_gan_nhat_key, snapshot_dashboard_json) — cần
+//     quyết định trigger DB hay service layer (xem plan mục 4).
+
+Enum loai_du_an_enum {
+  DDI
+  FDI
+  ODI
+}
+
+Enum loai_ky_enum {
+  QUY
+  NAM
+}
+
+Enum trang_thai_hoat_dong_enum {
+  active
+  inactive
+}
+
+Enum trang_thai_tuan_thu_enum {
+  tuan_thu
+  vi_pham
+}
+
+Enum tien_do_trang_thai_enum {
+  dung_tien_do
+  gap_kho_khan
+  cham_tien_do
+  khong_co_kha_nang_trien_khai
+}
+
+Enum muc_do_rui_ro_enum {
+  thap
+  trung_binh
+  cao
+  nghiem_trong
+}
+
+// ── Danh mục ─────────────────────────────────────────────────────────────
+
+Table dm_nganh {
+  ma_nganh varchar(10) [pk]
+  ten_nganh varchar(255) [not null]
+}
+
+Table dm_dia_ban {
+  ma_dia_ban varchar(10) [pk, note: 'Khuyến nghị dùng mã tỉnh/thành chuẩn (VD mã GSO) thay vì tự đặt mã mới']
+  ten_dia_ban varchar(255) [not null, unique]
+
+  note: 'MỚI — thay cho cột "dia_ban" free-text ở đề xuất gốc, để dropdown filter (docx 6.1) không bị rác dữ liệu (VD "TP.HCM" vs "TP. Hồ Chí Minh").'
+}
+
+Table dm_ky_bao_cao {
+  ky_key varchar(10) [pk]
+  nam smallint [not null]
+  quy smallint [note: 'NULL nếu loai_ky = NAM']
+  loai_ky loai_ky_enum [not null]
+  ngay_bat_dau date [not null]
+  ngay_ket_thuc date [not null]
+  thu_tu integer [not null, unique, note: 'Dùng ORDER BY thu_tu để lấy "N kỳ gần nhất" thay vì so sánh chuỗi']
+}
+
+Table dm_nghia_vu_tuan_thu {
+  nghia_vu_id bigint [pk, increment]
+  ten_nhom_nghia_vu varchar(100) [not null]
+  ten_nghia_vu varchar(255) [not null]
+  ap_dung_loai_du_an "varchar(20)[]" [not null]
+  tan_suat loai_ky_enum [not null]
+
+  note: '''
+    5 nhóm cố định theo nghiệp vụ: Tài chính, Quy định pháp luật (môi trường/xây dựng/khác), Tiến độ,
+    Nộp báo cáo định kỳ, Thủ tục cấp tài khoản báo cáo.
+    CẢNH BÁO NGHIỆP VỤ (không phải lỗi DB): theo spec công thức, nhóm "Thủ tục cấp tài khoản" và
+    "Quy định pháp luật..." hiện là "mặc định tuân thủ" (chưa có điều kiện đánh giá thật), nhóm
+    "Tài chính" chưa có công thức tuân thủ nào được định nghĩa. Cần chốt với BA trước khi build
+    (xem phan-tich-chuyen-sau-plan.md mục 3.4 / 4).
+  '''
+}
+
+// ── Đã có sẵn trong codebase (com.ai.ptcb.domain.entity) — biểu diễn tối giản để show quan hệ,
+//    KHÔNG tạo lại. Xem source thật tại CbNhomChiTieu.java / CbChiTieu.java. ─────────────────────
+
+Table cb_nhom_chi_tieu {
+  ma varchar(50) [pk, note: 'Đã tồn tại — Tài chính / Vốn & Giải ngân / Tiến độ / Tuân thủ / Rủi ro']
+  ten varchar(255) [not null]
+
+  note: 'ĐÃ CÓ SẴN trong com.ai.ptcb — liệt kê tối giản chỉ để thể hiện quan hệ FK, không phải bảng mới.'
+}
+
+Table cb_chi_tieu {
+  ma varchar(50) [pk, note: 'Đã tồn tại — mã chỉ tiêu, VD "doanh_thu", "ty_le_giai_ngan"']
+
+  note: 'ĐÃ CÓ SẴN trong com.ai.ptcb — liệt kê tối giản chỉ để thể hiện quan hệ FK, không phải bảng mới.'
+}
+
+// ── Dự án & báo cáo ──────────────────────────────────────────────────────
+
+Table dm_du_an {
+  project_id bigint [pk]
+  ma_du_an varchar(50) [not null, unique]
+  ten_du_an varchar(500) [not null]
+  loai_du_an loai_du_an_enum [not null]
+  ma_nganh varchar(10) [not null, ref: > dm_nganh.ma_nganh]
+  dia_ban_id varchar(10) [ref: > dm_dia_ban.ma_dia_ban]
+  dia_diem_thuc_hien varchar(500) [note: 'Chuỗi tự do — nguồn báo cáo (5 mẫu) chưa tách riêng field, xem plan mục 2.2.a']
+  ngay_cap_gcndt date [not null]
+  ma_so_doanh_nghiep varchar(50)
+  ten_tckt varchar(500) [note: '"Đơn vị quản lý" — snapshot ở mức dự án; mẫu 89 không có field tương ứng trong báo cáo']
+  ngay_cap_dkkd date
+  co_quan_cap_dkkd varchar(500)
+  dia_chi_lien_he varchar(500)
+  so_dien_thoai varchar(500)
+  email varchar(500)
+  trang_thai_hoat_dong trang_thai_hoat_dong_enum [not null, default: 'active']
+  ky_bao_cao_gan_nhat_key varchar(10) [ref: > dm_ky_bao_cao.ky_key, note: 'Cache — cần trigger/service cập nhật mỗi khi có bc_dinh_ky mới cho dự án']
+  ngay_nop_bc_gan_nhat date [note: 'Cache, cùng cơ chế cập nhật như trên']
+  snapshot_dashboard_json jsonb [note: 'Cache 5 KPI card — cần định nghĩa rõ thời điểm/cơ chế refresh trước khi dùng']
+  id_nguoi_tao integer
+  ngay_tao timestamp [not null, default: `now()`]
+  id_nguoi_sua integer
+  ngay_sua timestamp [not null, default: `now()`]
+  da_xoa boolean [not null, default: false]
+
+  indexes {
+    ma_nganh
+    dia_ban_id
+    ten_tckt [note: 'MỚI — "Đơn vị quản lý" là 1 trong 4 filter chính ở màn Danh sách dự án (docx 6.1), đề xuất gốc thiếu index này']
+    ky_bao_cao_gan_nhat_key
+    (loai_du_an, ma_nganh)
+  }
+
+  note: 'SỬA: ma_nganh NOT NULL (bắt buộc để tab So sánh trung bình ngành hoạt động). BỎ cột "linh_vuc" free-text của đề xuất gốc — trùng khái niệm với ma_nganh.'
+}
+
+Table bc_dinh_ky {
+  report_id bigserial [pk, increment]
+  project_id bigint [not null, ref: > dm_du_an.project_id]
+  loai_du_an loai_du_an_enum [not null, note: 'Snapshot tại thời điểm báo cáo, có thể khác giá trị hiện tại của dm_du_an nếu dự án đổi loại sau này']
+  ky_key varchar(10) [not null, ref: > dm_ky_bao_cao.ky_key]
+  loai_bao_cao_id integer [not null, note: '103/37/116/114/89 — lấy trực tiếp từ LoaiBaoCaoId của bảng BaoCao nguồn (xem plan mục 3.1)']
+  ngay_nop_bao_cao date [not null]
+  trang_thai varchar(20) [not null, default: 'duyet', note: 'Chưa enum hoá — cần biết đủ danh sách giá trị từ hệ thống báo cáo nguồn trước']
+  ma_bao_cao varchar(50) [not null, unique, note: 'Khoá tự nhiên map tới MaBaoCao của bảng BaoCao nguồn — dùng để upsert idempotent khi ETL chạy lại']
+  raw_json jsonb [note: 'Toàn bộ NoiDungChiTiet gốc — nguồn duy nhất cho field không chuẩn hoá (VD moTaChiTiet.*, danhGia.* của mẫu 89)']
+  kafka_event_id varchar(100) [unique]
+  ngay_nhan timestamp
+  nguoi_lap_bao_cao varchar(255)
+  tong_von_dau_tu_dang_ky numeric(20,2)
+  von_dau_tu_thuc_hien_luy_ke_gcndt numeric(20,2)
+  von_gop_ky numeric(20,2)
+  von_gop_luy_ke_gcndt numeric(20,2)
+  von_vay_ky numeric(20,2)
+  von_vay_luy_ke_gcndt numeric(20,2)
+  loi_nhuan_tai_dau_tu_ky numeric(20,2)
+  loi_nhuan_tai_dau_tu_luy_ke_gcndt numeric(20,2)
+  doanh_thu_thuan_ky numeric(20,2)
+  gia_tri_xuat_khau_ky numeric(20,2)
+  gia_tri_nhap_khau_ky numeric(20,2)
+  thue_va_nop_ngan_sach_ky numeric(20,2)
+  loi_nhuan_sau_thue_ky numeric(20,2)
+  chi_phi_rd_ky numeric(20,2)
+  chi_phi_moi_truong_ky numeric(20,2)
+  nguon_thu_khac_ky numeric(20,2)
+  loi_nhuan_ky numeric(20,2) [note: 'SỬA tên (gốc: "loi_nhuan") cho nhất quán suffix _ky — dùng cho ketQuaKinhDoanh.loiNhuan.nam của mẫu 89']
+  loi_nhuan_luy_ke numeric(20,2) [note: 'MỚI — đề xuất gốc thiếu cột lũy kế cho loi_nhuan (ketQuaKinhDoanh.loiNhuan.luyke, mẫu 89)']
+  tien_do_trang_thai tien_do_trang_thai_enum [note: 'Chỉ mẫu 89 có đủ dữ liệu cho cả 4 giá trị; mẫu 103/37/116/114 chỉ suy luận được dung_tien_do/gap_kho_khan (xem plan mục 3.4.2)']
+  kho_khan_vuong_mac text [note: 'Text mô tả gốc — KHÔNG phải enum trạng thái (đã tách rõ khỏi tien_do_trang_thai để tránh nhầm như đề xuất gốc)']
+  id_nguoi_tao integer
+  ngay_tao timestamp [not null, default: `now()`]
+  id_nguoi_sua integer
+  ngay_sua timestamp [not null, default: `now()`]
+  da_xoa boolean [not null, default: false]
+
+  indexes {
+    (project_id, ky_key) [unique, note: 'Giữ như đề xuất gốc — GIẢ ĐỊNH mỗi dự án chỉ có 1 báo cáo/kỳ; cần xác nhận nghiệp vụ có báo cáo bổ sung/điều chỉnh cùng kỳ không (plan mục 4)']
+    ky_key
+  }
+
+  note: 'BỎ 2 cột "chi_tieu_tai_chinh_json"/"co_cau_von_json" của đề xuất gốc — trùng lặp với raw_json + các cột _ky/_luy_ke đã đủ cho "Bảng chi tiết góp vốn" (chỉ cần theo hạng mục, không cần breakdown theo nhà đầu tư). "Vốn khác" KHÔNG có cột — không mẫu nào có nguồn dữ liệu (plan mục 3.4.1).'
+}
+
+// ── Phân tích: rủi ro / tuân thủ / dự báo / trung bình ngành / AI insight ─
+
+Table nhan_dinh_ai {
+  id bigserial [pk, increment]
+  project_id bigint [not null, ref: > dm_du_an.project_id]
+  report_id bigint [ref: > bc_dinh_ky.report_id]
+  ky_key varchar(10) [ref: > dm_ky_bao_cao.ky_key]
+  tab_nguon varchar(30) [not null, note: 'tong_quan / tai_chinh / von_giai_ngan / tien_do / rui_ro / so_sanh_ky / so_sanh_nganh / du_bao / goi_y']
+  loai_insight varchar(30) [not null]
+  tieu_de varchar(255)
+  noi_dung text [not null]
+  source_fields jsonb
+  ngay_tao timestamp [not null, default: `now()`]
+  het_han_luc timestamp [note: 'Đổi tên từ "expired_at" — CẦN chốt cơ chế cache/regenerate (Phase 5 InsightGenerationService), chưa rõ khi nào tạo bản ghi mới vs tái dùng cũ']
+
+  indexes {
+    report_id
+    (project_id, tab_nguon, ky_key)
+  }
+
+  note: 'Đổi tên từ "ai_insight" (đề xuất gốc) sang tiếng Việt cho nhất quán convention "tên bảng/cột tiếng Việt" của module ptcb.'
+}
+
+Table bc_rui_ro_chi_tiet {
+  id bigserial [pk, increment]
+  report_id bigint [not null, ref: > bc_dinh_ky.report_id]
+  project_id bigint [not null, ref: > dm_du_an.project_id]
+  ky_key varchar(10) [not null, ref: > dm_ky_bao_cao.ky_key]
+  danh_muc varchar(50) [not null, ref: > cb_nhom_chi_tieu.ma, note: 'ĐỀ XUẤT: FK sang cb_nhom_chi_tieu.ma (đã có sẵn) thay vì tự định nghĩa lại danh sách 4 danh mục — tránh 2 nguồn sự thật cho "nhóm chỉ tiêu"']
+  muc_do muc_do_rui_ro_enum [not null]
+  gia_tri_diem numeric(5,2) [not null, note: 'CHECK BETWEEN 0 AND 10 — thêm ở migration thật, DBML không hỗ trợ CHECK biểu thức']
+  insight_id bigint [ref: > nhan_dinh_ai.id]
+
+  indexes {
+    (report_id, danh_muc) [unique, note: 'MỚI — đề xuất gốc thiếu, mỗi danh mục chỉ có đúng 1 bản ghi/báo cáo']
+  }
+}
+
+Table bc_tuan_thu_chi_tiet {
+  id bigserial [pk, increment]
+  report_id bigint [not null, ref: > bc_dinh_ky.report_id, note: 'MỚI — thêm để nhất quán với bc_rui_ro_chi_tiet; đề xuất gốc chỉ có project_id+ky_key, thiếu liên kết trực tiếp tới báo cáo']
+  project_id bigint [not null, ref: > dm_du_an.project_id]
+  nghia_vu_id bigint [not null, ref: > dm_nghia_vu_tuan_thu.nghia_vu_id]
+  ky_key varchar(10) [not null, ref: > dm_ky_bao_cao.ky_key]
+  ten_nhom_snapshot varchar(100) [not null]
+  ten_nghia_vu_snapshot varchar(255) [not null]
+  trang_thai trang_thai_tuan_thu_enum [not null]
+  thuc_te_ghi_nhan text
+
+  indexes {
+    (report_id, nghia_vu_id) [unique, note: 'MỚI — mỗi nghĩa vụ chỉ có đúng 1 đánh giá/báo cáo']
+    trang_thai
+  }
+}
+
+Table bc_du_bao {
+  id bigserial [pk, increment]
+  project_id bigint [not null, ref: > dm_du_an.project_id]
+  ky_key_du_bao varchar(10) [not null, ref: > dm_ky_bao_cao.ky_key]
+  nhom_chi_tieu varchar(50) [not null, ref: > cb_nhom_chi_tieu.ma, note: 'ĐỀ XUẤT: FK sang cb_nhom_chi_tieu.ma, cùng lý do như bc_rui_ro_chi_tiet.danh_muc']
+  gia_tri_du_bao numeric(20,2) [note: 'Dùng cho nhóm Tài chính / Vốn & Giải ngân / Tuân thủ — kết quả dạng số']
+  nhan_du_bao varchar(30) [note: 'MỚI — đề xuất gốc thiếu. Dùng cho nhóm Tiến độ (trạng thái dự báo) và Rủi ro (mức độ dự báo) — 2 nhóm này KHÔNG trả về số']
+  growth_pct numeric(6,2)
+  model_meta_json jsonb
+  ngay_tao timestamp [not null, default: `now()`]
+
+  indexes {
+    (project_id, ky_key_du_bao, nhom_chi_tieu) [unique]
+  }
+}
+
+Table bc_chi_tieu_trung_binh {
+  avg_id bigserial [pk, increment]
+  ky_key varchar(10) [not null, ref: > dm_ky_bao_cao.ky_key]
+  ma_nganh varchar(10) [not null, ref: > dm_nganh.ma_nganh, note: 'SỬA: NOT NULL (đề xuất gốc để nullable) — trung bình luôn tính theo ngành']
+  chi_tieu varchar(50) [not null, ref: > cb_chi_tieu.ma, note: 'ĐỀ XUẤT: FK sang cb_chi_tieu.ma (đã có sẵn) thay vì free text — tránh trùng tên chỉ tiêu khác cách viết giữa các nơi']
+  gia_tri_trung_binh numeric(20,2) [not null, note: 'CHECK >= 0 — thêm ở migration thật']
+  so_mau integer [not null]
+  ngay_sua timestamp [not null, default: `now()`]
+
+  indexes {
+    (ky_key, ma_nganh, chi_tieu) [unique]
+  }
+}
+
+TableGroup danh_muc {
+  dm_nganh
+  dm_dia_ban
+  dm_ky_bao_cao
+  dm_nghia_vu_tuan_thu
+}
+
+TableGroup ptcb_hien_co {
+  cb_nhom_chi_tieu
+  cb_chi_tieu
+}
+
+TableGroup du_an_bao_cao {
+  dm_du_an
+  bc_dinh_ky
+}
+
+TableGroup phan_tich_chuyen_sau {
+  nhan_dinh_ai
+  bc_rui_ro_chi_tiet
+  bc_tuan_thu_chi_tiet
+  bc_du_bao
+  bc_chi_tieu_trung_binh
+}

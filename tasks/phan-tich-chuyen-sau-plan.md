@@ -1,8 +1,14 @@
 # Phân tích chuyên sâu dự án — Phân tích nghiệp vụ & Kế hoạch triển khai
 
-> Nguồn: `.claude/tasks/phantichchuyensau.docx` (mục 6.1–6.3 của tài liệu đặc tả nghiệp vụ/giao diện).
-> Tài liệu này tóm tắt nghiệp vụ và đề xuất kế hoạch triển khai backend cho module mới
-> **"Phân tích & Cảnh báo" → Phân tích chuyên sâu dự án**, đối chiếu với trạng thái hiện tại của repo.
+> Nguồn:
+> - `.claude/tasks/phantichchuyensau.docx` (mục 6.1–6.3 của tài liệu đặc tả nghiệp vụ/giao diện)
+> - `.claude/tasks/100 dòng bc.xlsx` (data mẫu thật của bảng báo cáo nguồn)
+> - `.claude/tasks/Mô tả logic công thức.xlsx` (spec công thức chi tiết theo từng mẫu báo cáo, 3 sheet)
+> - `.claude/tasks/schema_fixed.sql` (**bản đề xuất DB** từ phía đối tác/khách hàng — không phải bản chốt, được phép điều chỉnh theo nghiệp vụ thực tế)
+>
+> **Phạm vi của file này: chỉ phần "Phân tích chuyên sâu"** (mục 6.1–6.3 của docx). Phần "Cảnh báo"
+> (cấu hình ngưỡng thống kê, dashboard cảnh báo, chi tiết cảnh báo — phát hiện thêm ở
+> `Mô tả logic công thức.xlsx` sheet 2) **nằm ngoài phạm vi**, xem mục 6.
 
 ## 1. Tóm tắt tài liệu nguồn
 
@@ -26,13 +32,18 @@ Toàn bộ luồng đi qua cùng một breadcrumb: đăng nhập → phân hệ 
 - Empty state khi không có dữ liệu / không có kết quả tìm kiếm (2 thông điệp khác nhau).
 - Action trên mỗi dòng: mở "Chi tiết phân tích chuyên sâu" cho dự án đó.
 
-**Ngụ ý kỹ thuật**: cần một nguồn dữ liệu "dự án" — hoặc là bảng cache/replica cục bộ, hoặc gọi API sang phân hệ dự án (Feign client), tài liệu không nói rõ. Đây là **điểm cần làm rõ** (xem mục 4).
+**Ngụ ý kỹ thuật**: cần một nguồn dữ liệu "dự án" — xem mục 3.2 (đã có gợi ý cấu trúc `dm_du_an`).
 
 ### 2.2. Chi tiết phân tích chuyên sâu 1 dự án (6.2)
 
+> **Lưu ý**: công thức mô tả dưới đây lấy theo docx gốc, ở mức tổng quan. Khi code, dùng
+> **mục 3.3** (spec công thức chi tiết từ `Mô tả logic công thức.xlsx`) làm nguồn chính thức —
+> chi tiết hơn và có vài điểm khác so với docx (VD: chia điểm rủi ro tài chính theo số chỉ tiêu
+> thực tế của từng mẫu, không phải hằng số).
+
 #### a. Header cố định (sticky) + 5 KPI card
 
-Thông tin chung của dự án + kỳ báo cáo hiện tại, ánh xạ tới **5 mẫu báo cáo định kỳ khác nhau** (đây là phần quan trọng nhất về mặt dữ liệu):
+Thông tin chung của dự án + kỳ báo cáo hiện tại, ánh xạ tới **5 mẫu báo cáo định kỳ khác nhau**:
 
 | Mẫu báo cáo | Loại kỳ | Field nguồn chính |
 | --- | --- | --- |
@@ -42,7 +53,7 @@ Thông tin chung của dự án + kỳ báo cáo hiện tại, ánh xạ tới *
 | Mẫu 114 | Báo cáo quý | tương tự 103 |
 | Mẫu 89 | Đầu tư ra nước ngoài | cấu trúc lồng nhau khác hẳn: `thongTinDuAnNuocNgoai.*`, `moTaChiTiet.*`, `danhGia.*`, `ketQuaKinhDoanh.*` |
 
-→ **Đây là 5 schema JSON khác nhau cho cùng khái niệm "báo cáo định kỳ"**, khớp với `mappingNguonCol` (JSON) đã có sẵn trên `CbChiTieu` — bảng nguồn `bc_dinh_ky` được nhắc trong Javadoc nhưng **chưa có entity**.
+→ 5 schema JSON khác nhau cho cùng khái niệm "báo cáo định kỳ" — **đã xác nhận nguồn thật** ở mục 3.1.
 
 5 KPI card: Tổng mức đầu tư, Tỷ lệ giải ngân (có công thức), Tiến độ thực hiện (suy luận fallback từ `khoKhanVuongMac`), Tuân thủ (%), Rủi ro (điểm/10 + phân loại theo ngưỡng).
 
@@ -54,88 +65,147 @@ Thông tin chung của dự án + kỳ báo cáo hiện tại, ánh xạ tới *
 | Tài chính | Bar chart kỳ này/kỳ trước theo 8 chỉ tiêu, bảng chi tiết + % biến động + xu hướng | LLM (gọi ngoài) |
 | Vốn & Giải ngân | Bar chart cơ cấu vốn theo kỳ (≤4 kỳ) + donut kỳ gần nhất + tiến độ giải ngân (công thức %) + bảng chi tiết góp vốn | LLM (gọi ngoài) |
 | Tiến độ | Line chart 4 trạng thái tiến độ (≤5 kỳ) + bảng ma trận đánh dấu | rule-based hoặc LLM |
-| Tuân thủ | Donut tổng thể + 3 card thống kê + bảng cây cha/con theo **5 nhóm tuân thủ cố định** (Tài chính, Môi trường/Xây dựng/..., Tiến độ, Nộp báo cáo định kỳ, Thủ tục cấp tài khoản) | không có insight AI ở tab này |
-| Rủi ro | Gauge 0–10 + 4 danh mục con (Tài chính/Tiến độ/Vốn&Giải ngân/Tuân thủ) + bảng + AI insight | LLM (gọi ngoài) x2 (khuyến nghị ngắn + diễn giải nguyên nhân theo danh mục + insight tổng) |
+| Tuân thủ | Donut tổng thể + 3 card thống kê + bảng cây cha/con theo **5 nhóm tuân thủ cố định** | không có insight AI ở tab này |
+| Rủi ro | Gauge 0–10 + 4 danh mục con + bảng + AI insight | LLM (gọi ngoài) x2 |
 | So sánh (đa chỉ tiêu theo kỳ) | Toggle 1-trong-4 nhóm chỉ tiêu, chọn chỉ tiêu con, bar chart 4 kỳ + line overlay, bảng nhóm cha/con | LLM |
 | So sánh (với trung bình ngành) | Radar chart 5 trục (dự án vs trung bình ngành cùng lĩnh vực/kỳ) + bảng chi tiết | LLM |
-| Dự báo | Bar chart dự báo (giống So sánh nhưng disable ô chọn) + 5 card dự báo (mô hình dự báo trên chuỗi lịch sử) | LLM |
-| Gợi ý | Card list phát hiện mức Cao/Nghiêm trọng, chỉ **enable khi tab Rủi ro có ≥1 nhóm Cao/Nghiêm trọng** | LLM (tiêu đề + nội dung diễn giải) |
+| Dự báo | Bar chart dự báo (giống So sánh nhưng disable ô chọn) + 5 card dự báo | LLM |
+| Gợi ý | Card list phát hiện mức Cao/Nghiêm trọng, chỉ enable khi tab Rủi ro có ≥1 nhóm Cao/Nghiêm trọng | LLM |
 
 **Quan sát quan trọng về nghiệp vụ**:
-1. **5 nhóm chỉ tiêu cố định xuyên suốt**: Tài chính, Vốn & Giải ngân, Tiến độ, Tuân thủ, Rủi ro — khớp 1-1 với khái niệm `CbNhomChiTieu` đã có sẵn trong module `ptcb`. Đây gần như chắc chắn là lý do `CbChiTieu`/`CbNhomChiTieu` được tạo trước.
-2. **AI insight xuất hiện ở 7/10 vùng** (Tổng quan, Tài chính, Vốn&Giải ngân, Tiến độ, Rủi ro x3, So sánh x2, Dự báo, Gợi ý) — luôn theo pattern: "gọi API LLM ngoài, truyền context liên quan làm input, nhận về đoạn text". Cần 1 service/client LLM dùng chung, không phải build riêng lẻ từng tab. `AiServiceClient` hiện có (RestTemplate + WS) là ứng viên tái sử dụng/mở rộng — cần xác nhận nó có endpoint "generate insight" hay chỉ có OCR/hybrid-search (xem mục 4).
-3. **Nhiều công thức tính rõ ràng, có thể unit-test được** (tỷ lệ giải ngân, biến động %, tỷ lệ đạt/chênh lệch kế hoạch, điểm rủi ro theo ngưỡng, % tăng trưởng dự báo...) — nên tách thành các pure calculator/service riêng theo từng nhóm chỉ tiêu.
-4. **Tab Gợi ý có điều kiện enable phụ thuộc dữ liệu của tab Rủi ro** — logic cross-tab, không chỉ là UI, cần backend trả về 1 flag (`hasCriticalOrHighRisk`) ở API tổng quan/header.
-5. Tất cả bảng "kỳ trước/kỳ này", "4 kỳ gần nhất", "5 kỳ gần nhất", "4–8 kỳ tuỳ chọn" đều phụ thuộc vào **loại báo cáo gần nhất là quý hay năm** — kỳ báo cáo không cố định là quý, cần 1 khái niệm "kỳ" trừu tượng (quý hoặc năm) xuyên suốt toàn bộ tầng service.
+1. **5 nhóm chỉ tiêu cố định xuyên suốt**: Tài chính, Vốn & Giải ngân, Tiến độ, Tuân thủ, Rủi ro — khớp 1-1 với `CbNhomChiTieu` đã có trong module `ptcb`.
+2. **AI insight xuất hiện ở 7/10 vùng** — luôn theo pattern "gọi API LLM ngoài, truyền context, nhận về text". Cần 1 service/client LLM dùng chung.
+3. **Nhiều công thức tính rõ ràng, unit-test được** — tách thành pure calculator/service riêng theo từng nhóm chỉ tiêu.
+4. **Tab Gợi ý phụ thuộc dữ liệu tab Rủi ro** — cần backend trả flag `hasCriticalOrHighRisk`.
+5. Mọi bảng "kỳ trước/kỳ này/N kỳ gần nhất" phụ thuộc **loại báo cáo gần nhất là quý hay năm** — cần khái niệm "kỳ" trừu tượng xuyên suốt service layer.
 
 ### 2.3. Xuất báo cáo (6.3)
 
 - Popup chọn tối thiểu 1 trong **9 tab** (checkbox), "Chọn tất cả" dạng toggle 2 chiều.
-- Xuất ra **file zip**, mỗi tab đã chọn → 1 file PNG riêng (Header cố định + nội dung tab đó), tên file `BaoCao_{MaDuAn}_{KyBaoCao}.zip`.
-- Có validate (chưa chọn tab nào), loading state, toast success/error (tự ẩn sau 3s).
-- **Việc render "PNG của 1 tab dashboard"** thường được làm ở FE (screenshot canvas/html-to-image) hoặc bằng 1 headless-render service; đây là điểm cần làm rõ vì ảnh hưởng lớn tới scope backend (xem mục 4).
+- Xuất ra **file zip**, mỗi tab đã chọn → 1 file PNG riêng, tên file `BaoCao_{MaDuAn}_{KyBaoCao}.zip`.
+- Có validate, loading state, toast success/error (tự ẩn sau 3s).
+- Cách render PNG (server-side hay FE tự capture) vẫn là điểm mở (mục 4).
 
-## 3. Điểm cần làm rõ trước khi thiết kế chi tiết (open questions)
+## 3. Ngữ cảnh bổ sung từ dữ liệu mẫu & spec công thức chi tiết
 
-1. **Nguồn "dự án" và "phân hệ dự án"**: là một service khác (Feign/API ngoài) hay bảng nội bộ đồng bộ qua Kafka (giống các `InboxProcessor` hiện có cho Investor/Legal/News/IndustrialZone)? Ảnh hưởng trực tiếp tới việc có cần entity `DuAn` nội bộ hay chỉ cache.
-2. **Nguồn `bc_dinh_ky`** (báo cáo định kỳ, 5 mẫu 103/37/116/114/89): ingest từ đâu (Kafka, upload thủ công, hệ thống báo cáo khác)? `CbChiTieu.mappingNguonCol` giả định bảng này tồn tại nhưng chưa có entity/migration.
-3. **"Trung bình ngành"** (tab So sánh): cần tính trung bình cộng của "toàn bộ dự án cùng lĩnh vực" — có bao nhiêu dự án trong hệ thống, tính real-time hay batch/cache định kỳ (ảnh hưởng hiệu năng nếu tính on-the-fly mỗi lần mở tab)?
-4. **Mô hình dự báo** (tab Dự báo): "mô hình dự báo trên chuỗi lịch sử" — cần xác nhận đây là thuật toán đơn giản (linear regression/trung bình trượt) tự viết, hay gọi ra ngoài (AI service/LLM) như các tab khác.
-5. **LLM client dùng chung**: `AiServiceClient` hiện tại có hỗ trợ prompt tự do "generate insight from context" không, hay cần thêm client/endpoint mới?
-6. **Export PNG/zip**: server-side render (cần thư viện chart-to-image phía Java) hay chỉ backend cung cấp data, FE tự capture & zip? Quyết định này ảnh hưởng rất lớn tới độ phức tạp của use-case 6.3.
-7. **Ngưỡng cấu hình** (mức rủi ro thấp/TB/cao/nghiêm trọng, ngưỡng gợi ý cao/nghiêm trọng...) — hard-code hay cấu hình được (bảng config, tương tự `AiKnowledgeAlertConfig`)?
+### 3.1. Nguồn dữ liệu báo cáo thật đã tồn tại (`100 dòng bc.xlsx`)
 
-→ Đề xuất: trước khi code, trao đổi lại với BA/PO các mục 1, 2, 4, 6 vì chúng quyết định kiến trúc (nguồn dữ liệu ngoài vs nội bộ, có cần thêm dependency mới không).
+File chứa data mẫu thật (5 dòng, mỗi dòng 1 mẫu báo cáo) của một bảng nguồn **đã tồn tại ở hệ thống/phân hệ khác** (không phải trong `ptcb`), với cấu trúc:
 
-## 4. Đề xuất kế hoạch triển khai (theo `docs/clean_architecture_guide.md` & convention `com.ai.ptcb`)
+| Cột | Ý nghĩa |
+| --- | --- |
+| `Id` | Khoá chính |
+| `MaBaoCao` | Mã báo cáo, VD `FDI_AIII1_548` (tiền tố loại dự án + mã mẫu + số thứ tự) |
+| `LoaiBaoCaoId` | **= 103 / 37 / 116 / 114 / 89** — định danh mẫu báo cáo |
+| `LoaiKy` | Loại kỳ — **rỗng/NULL trong toàn bộ data mẫu, không đáng tin cậy** |
+| `NgayNop` | Ngày nộp báo cáo |
+| `TrangThai` | Trạng thái báo cáo |
+| `NoiDungChiTiet` | **JSON chứa toàn bộ field nghiệp vụ** (tenDuAn, tongVonDauTuDangKy, phanB.vonGop/vonVay/..., khoKhanVuongMac, hoặc với mẫu 89: thongTinDuAnNuocNgoai/danhGia/moTaChiTiet/bangSoLieu...) |
+| `IdNguoiTao/NgayTao/IdNguoiSua/NgaySua/DaXoa` | Audit chuẩn |
+| `BuocHienTai/MaQuyTrinh/BuocCaoNhat/DonViId` | Field workflow — gợi ý bảng này thuộc 1 hệ thống quản lý quy trình nộp báo cáo riêng |
 
-Vì nghiệp vụ xoay quanh "chỉ tiêu"/"nhóm chỉ tiêu" đã có sẵn trong `com.ai.ptcb`, đề xuất **tiếp tục trong module `ptcb`**, dùng `BaseAudit` + tên bảng/cột tiếng Việt, audit thủ công qua `UserContext.getTaiKhoanId()` — theo đúng convention đã ghi trong CLAUDE.md, **không** copy convention của `com.ai.domain`.
+**Kết luận**: đây chính là nguồn cho khái niệm "báo cáo định kỳ" (`bc_dinh_ky` ở mục 3.2). Module Phân tích chuyên sâu **chỉ cần đọc** dữ liệu này (qua DB chung, API, hoặc đồng bộ) — không tự sinh/nhập báo cáo. Cần xác nhận thêm (vẫn là open question #2 ở mục 4): cơ chế đọc là gì (share DB, Feign, hay Kafka sync).
 
-### Phase 0 — Chốt open questions (mục 3) + thiết kế DB
+### 3.2. `schema_fixed.sql` — bản đề xuất, không phải bản chốt
 
-- Entity `DuAn` (hoặc xác nhận chỉ là cache/proxy nếu dữ liệu đến từ service ngoài).
-- Entity `BcDinhKy` (báo cáo định kỳ) lưu JSONB nội dung thô theo từng mẫu (103/37/116/114/89) — khớp với cách `CbChiTieu.mappingNguonCol` đã giả định, dùng `@JdbcTypeCode(SqlTypes.JSON)` như `CbChiTieu`.
-- Entity cấu hình ngưỡng (rủi ro, gợi ý) nếu cần cấu hình động thay vì hard-code.
+> Theo xác nhận của người dùng: **file SQL này là đề xuất từ phía đối tác/khách hàng, được phép
+> điều chỉnh tự do** — DB thật cần thiết kế lại theo đúng nghiệp vụ + công thức (mục 3.3), không
+> nhất thiết giữ nguyên tên bảng/cột/cấu trúc của bản đề xuất.
+
+Nội dung đề xuất (schema Postgres `test`): `dm_nganh`, `dm_ky_bao_cao`, `dm_nghia_vu_tuan_thu`, `dm_du_an`, `bc_dinh_ky` (cột chuẩn hoá + `raw_json` JSONB), view `vw_bc_dinh_ky_dashboard`, `ai_insight`, `bc_rui_ro_chi_tiet`, `bc_tuan_thu_chi_tiet`, `bc_du_bao`, `bc_chi_tieu_trung_binh`.
+
+Đối chiếu với spec công thức chi tiết (mục 3.3), các điểm **cần chỉnh so với bản đề xuất**:
+
+1. **ETL từ `NoiDungChiTiet` → `bc_dinh_ky` phải viết riêng theo từng `LoaiBaoCaoId`**, không thể dùng 1 mapper chung — vì ý nghĩa cột "kỳ/lũy kế" trong JSON nguồn khác nhau giữa các mẫu (xem mục 3.4, điểm 4).
+2. Bản đề xuất không có cột nào cho **"Vốn khác"** — đúng với thực tế (không mẫu nào có nguồn dữ liệu cho hạng mục này), nhưng UI (docx 2.2.d) lại hiển thị hạng mục này → cần quyết định nghiệp vụ trước khi map DB (mục 3.4, điểm 1).
+3. Nên thêm 1 bảng/cấu hình "số chỉ tiêu tài chính có sẵn theo từng mẫu" (4/7/8 chỉ tiêu tuỳ mẫu) để phục vụ công thức điểm rủi ro nhóm Tài chính — bản đề xuất chưa có (mục 3.4, điểm 3).
+4. `LoaiKy` không nên copy trực tiếp từ bảng nguồn — phải suy ra từ `LoaiBaoCaoId` + field trong JSON khi ETL (mục 3.4, điểm 5).
+5. Về convention: nếu tiếp tục trong module `ptcb`, cần dịch tên bảng sang đúng style đang dùng (`BaseAudit`, tên entity Java PascalCase, ví dụ `DmDuAn`/`BcDinhKy`/`AiInsight`...) — bản đề xuất dùng `created_at/updated_at` kiểu tiếng Anh, khác với `BaseAudit` (`ngay_tao`, `ngay_sua`, `da_xoa`, `id_nguoi_tao`, `id_nguoi_sua`).
+
+### 3.3. Spec công thức chi tiết (`Mô tả logic công thức.xlsx`, sheet 1 & 3) — nguồn tham chiếu chính khi code
+
+- **Sheet 1** (~110 dòng công thức): với mỗi thành phần UI, liệt kê công thức + mapping field chi tiết cho **cả 5 mẫu báo cáo** — chính xác và đầy đủ hơn hẳn phần mô tả trong docx. Khi 2 nguồn (docx vs sheet này) mâu thuẫn, **ưu tiên sheet này**.
+- **Sheet 3** (data dictionary): ma trận **Nhóm chỉ tiêu × Chỉ tiêu × Mẫu báo cáo × (Kỳ báo cáo / Lũy kế GCNDT)** — dùng làm bảng tham chiếu field mapping duy nhất khi viết mapper/ETL.
+- Sheet 2 (cấu hình ngưỡng cảnh báo, dashboard, chi tiết cảnh báo) — thuộc phần "Cảnh báo", ngoài phạm vi (mục 6).
+
+### 3.4. Rủi ro/gap nghiệp vụ mới phát hiện (ảnh hưởng trực tiếp tới UI đã đặc tả trong docx)
+
+1. **"Vốn khác" không có nguồn dữ liệu ở bất kỳ mẫu nào** (sheet 3: dòng "Vốn khác" trống cho cả 5 mẫu), nhưng tab Vốn & Giải ngân (docx 2.2.d) mô tả bar/donut chart có đủ 4 hạng mục gồm cả "Vốn khác". → **Cần hỏi BA**: bỏ hạng mục này, luôn hiển thị 0/"-", hay có nguồn khác chưa được liệt kê trong spec?
+2. **Trạng thái tiến độ: 4/5 mẫu chỉ suy luận được 2/4 trạng thái.** Mẫu 103/37/116/114 chỉ fallback ra "Đúng tiến độ" / "Gặp khó khăn" từ text tự do `khoKhanVuongMac`; **không thể** tự suy ra "Chậm tiến độ" hay "Không có khả năng triển khai" bằng rule. Chỉ mẫu 89 có đủ 4 cờ boolean thật (`danhGia.dungTienDo/chamTienDo/khoKhanVuongMac/khongCoKhaNangTrienKhai`). → Ảnh hưởng: line chart Tiến độ (docx 2.2.e) hứa 4 trạng thái nhưng phần lớn dự án trong nước thực tế chỉ có 2/4 khả dụng; công thức điểm rủi ro nhóm Tiến độ (đúng=2.5/chậm=5/khó khăn=7.5/không thể=10) cũng gần như không bao giờ ra 5 hoặc 10 với dữ liệu trong nước.
+3. **Điểm rủi ro nhóm "Tài chính" chia theo số chỉ tiêu khác nhau theo từng mẫu** (chia 4, 7, hoặc 8 tuỳ mẫu, không phải hằng số cố định) — công thức: số chỉ tiêu có Xu hướng giảm × (10 / số chỉ tiêu khả dụng của mẫu đó). Cần bảng cấu hình hoặc tính động số chỉ tiêu có dữ liệu, không hard-code chia 8.
+4. **Ý nghĩa cột `cotA`/`cotB`/`cotC` KHÔNG giống nhau giữa các mẫu**: mẫu 103/114 → cotA=kỳ, cotC=lũy kế GCNDT (cotB không dùng); mẫu 37/116 → cotA=kỳ, cotB=lũy kế (không có cotC). → Mapper/ETL phải viết riêng theo `LoaiBaoCaoId`.
+5. **`LoaiKy` trên bảng nguồn không đáng tin cậy** (rỗng/NULL trong toàn bộ data mẫu) — kỳ báo cáo (quý/năm) phải tự suy ra từ `LoaiBaoCaoId` (103,114→quý; 37,116→năm; 89→năm theo `NgayNop`), không đọc trực tiếp cột `LoaiKy`.
+
+## 4. Điểm cần làm rõ (cập nhật theo ngữ cảnh mới)
+
+| # | Nội dung | Trạng thái |
+| --- | --- | --- |
+| 1 | Nguồn "dự án" (`dm_du_an`): đồng bộ từ phân hệ dự án hay bảng riêng? | Vẫn mở — nhưng field list đã rõ hơn nhờ schema đề xuất (mục 3.2) |
+| 2 | Nguồn `bc_dinh_ky`: cơ chế đọc từ bảng `BaoCao` (share DB / API / Kafka)? | **Đã xác nhận nguồn** (mục 3.1); cơ chế đồng bộ vẫn cần chốt |
+| 3 | "Trung bình ngành" tính real-time hay batch? | **Có gợi ý**: bảng `bc_chi_tieu_trung_binh` có `updated_at` → hướng batch; cần chốt job/schedule |
+| 4 | Mô hình dự báo dùng thuật toán nào? | Vẫn mở — `bc_du_bao.model_meta_json` gợi ý có model thật nhưng chưa rõ thuật toán |
+| 5 | LLM client dùng chung có sẵn không? | Vẫn mở |
+| 6 | Export PNG/zip: server-render hay FE tự capture? | Vẫn mở |
+| 7 | Ngưỡng cấu hình động (rủi ro, gợi ý...) | **Ra khỏi phạm vi** — thuộc mảng "Cảnh báo", xem mục 6 |
+| 8 (mới) | "Vốn khác" không có nguồn dữ liệu — bỏ hay giữ UI? | Mở (mục 3.4.1) |
+| 9 (mới) | Chấp nhận 2/4 trạng thái tiến độ cho báo cáo trong nước, hay cần nguồn dữ liệu khác? | Mở (mục 3.4.2) |
+
+## 5. Đề xuất kế hoạch triển khai (theo `docs/clean_architecture_guide.md` & convention `com.ai.ptcb`)
+
+Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng Việt, audit thủ công qua `UserContext.getTaiKhoanId()`.
+
+### Phase 0 — Chốt open questions (mục 4) + thiết kế DB
+
+- Dùng `schema_fixed.sql` làm **điểm khởi đầu tham khảo**, không copy nguyên — thiết kế lại entity theo 5 điều chỉnh ở mục 3.2 và điền `BaseAudit`.
+- Entity dự kiến: `DuAn`, `BcDinhKy` (JSONB raw + cột chuẩn hoá, ETL riêng theo `LoaiBaoCaoId`), `AiInsight`, `BcRuiRoChiTiet`, `BcTuanThuChiTiet` (+ `NghiaVuTuanThu`), `BcDuBao`, `BcChiTieuTrungBinh`, `DmNganh`, `DmKyBaoCao`.
+- Thêm cấu hình "số chỉ tiêu tài chính theo mẫu" (mục 3.4.3) nếu không muốn hard-code trong service.
 
 ### Phase 1 — Danh sách dự án (6.1)
 
-- Repository + service đọc `DuAn` (paginate, search theo mã/tên, filter lĩnh vực/địa điểm/địa bàn/đơn vị quản lý).
-- DTO response theo `BaseResponseDTO` + `metaData` phân trang (convention đã có sẵn trong repo).
+- Repository + service đọc `DuAn` (paginate, search, filter).
 - Controller `GET /api/PhanTichChuyenSau/DuAn` với `@Permission`.
 
 ### Phase 2 — Header + KPI card + Tab Tổng quan (6.2.a, 6.2.b)
 
-- Service map 5 mẫu báo cáo → 1 DTO chuẩn hoá chung (tenDuAn, diaDiemThucHien, kỳ báo cáo, đơn vị quản lý...) — nơi tập trung toàn bộ logic "theo mẫu nào thì lấy field nào" đã liệt kê ở mục 2.2.a.
-- Calculator riêng cho từng KPI (tỷ lệ giải ngân, tiến độ fallback, tuân thủ %, điểm rủi ro + phân loại ngưỡng) — pure function, dễ unit test.
-- Tab Tổng quan: ghép 4 đoạn mô tả + gọi LLM client (rule-based fallback nếu LLM lỗi/không cấu hình).
+- Mapper riêng theo từng `LoaiBaoCaoId` (103/37/116/114/89) — bám sát mục 3.3 (sheet 1+3), **không dùng docx làm nguồn công thức**.
+- Calculator riêng cho từng KPI, pure function, dễ unit test.
+- Tab Tổng quan: ghép 4 đoạn mô tả + gọi LLM client (rule-based fallback).
 
 ### Phase 3 — Tab theo từng nhóm chỉ tiêu (Tài chính, Vốn & Giải ngân, Tiến độ, Tuân thủ, Rủi ro)
 
-- Mỗi tab 1 service riêng, tái sử dụng khái niệm "kỳ" (quý/năm) trừu tượng đã nêu ở mục 2.2 (4).
-- Tuân thủ: model cây cha/con 5 nhóm cố định + rule "vi phạm nếu có ≥1 con vi phạm".
-- Rủi ro: cần trả thêm flag `hasCriticalOrHighRisk` để tab Gợi ý (FE) biết enable/disable.
-- Tích hợp LLM insight qua 1 client/service dùng chung (xem Phase 5), không lặp code gọi LLM ở từng tab.
+- Mỗi tab 1 service riêng; risk-score Tài chính dùng số chỉ tiêu động theo mẫu (mục 3.4.3), không hard-code.
+- Tiến độ: xử lý rõ trường hợp chỉ 2/4 trạng thái khả dụng cho báo cáo trong nước (mục 3.4.2) — cần quyết định nghiệp vụ trước khi code UI cho 4 trạng thái.
+- Vốn & Giải ngân: xử lý "Vốn khác" theo quyết định ở mục 3.4.1.
+- Rủi ro: trả flag `hasCriticalOrHighRisk` cho tab Gợi ý.
 
 ### Phase 4 — So sánh, Dự báo, Gợi ý (6.2.g–k)
 
-- So sánh theo kỳ: cần query N kỳ gần nhất hoặc theo danh sách kỳ tuỳ chọn.
-- So sánh trung bình ngành: cần quyết định tính real-time hay cache (Phase 0, mục 3) trước khi implement.
-- Dự báo: cần chốt thuật toán (Phase 0, mục 4) trước khi implement — có thể làm placeholder rule-based trước (VD: trung bình trượt) rồi thay bằng model thật sau.
-- Gợi ý: chỉ trả dữ liệu khi tab Rủi ro có nhóm Cao/Nghiêm trọng — dùng lại flag ở Phase 3.
+- So sánh trung bình ngành: dùng `bc_chi_tieu_trung_binh` (batch), cần job tính toán riêng (ngoài phạm vi phase này, xem Phase 0).
+- Dự báo: cần chốt thuật toán (mục 4, #4) — có thể làm placeholder rule-based trước.
+- Gợi ý: dùng lại flag `hasCriticalOrHighRisk` từ Phase 3.
 
 ### Phase 5 — LLM insight client dùng chung
 
-- Xác nhận `AiServiceClient` có hỗ trợ prompt tự do; nếu không, thêm method/endpoint mới (Feign hoặc RestTemplate) theo pattern hiện có trong `com.ai.infrastructure.external.ai`.
-- 1 service `InsightGenerationService` nhận `(context data, prompt template)` → gọi LLM → trả text, có fallback rule-based khi lỗi/timeout (nhiều chỗ trong tài liệu ghi "rule-based hoặc LLM").
+- Xác nhận `AiServiceClient` có hỗ trợ prompt tự do; nếu không, thêm client mới theo pattern hiện có.
+- 1 service `InsightGenerationService` nhận `(context, prompt template)` → LLM → text, fallback rule-based khi lỗi.
 
 ### Phase 6 — Xuất báo cáo (6.3)
 
-- Sau khi chốt mục 3.6: nếu server-side render, cần thêm thư viện tạo ảnh từ chart (rủi ro kỹ thuật, nên POC riêng trước khi cam kết); nếu FE tự capture, backend chỉ cần API tổng hợp data theo tab đã chọn + endpoint đóng gói zip (MinIO tạm hoặc stream trực tiếp).
-- Controller nhận danh sách tab đã chọn → validate ≥1 → build response/orchestrate export.
+- Phụ thuộc quyết định server-render vs FE-capture (mục 4, #6) — POC riêng trước khi cam kết nếu chọn server-render.
 
 ### Ghi chú ưu tiên
 
 - Phase 0–2 là nền tảng bắt buộc, không thể song song.
-- Phase 3 có thể chia nhỏ và làm song song theo từng nhóm chỉ tiêu (5 sub-team/PR độc lập) vì mỗi tab tương đối độc lập ngoài phần dùng chung ở Phase 0/5.
-- Phase 4 (So sánh trung bình ngành, Dự báo) rủi ro cao nhất về hiệu năng/độ chính xác — nên làm sau cùng, sau khi Phase 0 mục 3–4 đã chốt.
-- Phase 6 (xuất báo cáo) nên làm cuối vì phụ thuộc toàn bộ data của các tab khác đã ổn định.
+- Phase 3 có thể chia nhỏ, làm song song theo từng nhóm chỉ tiêu — nhưng 2 điểm mở (Vốn khác, 2/4 trạng thái tiến độ) nên chốt với BA trước khi bắt đầu để tránh phải sửa lại UI/logic.
+- Phase 4 rủi ro cao nhất về hiệu năng/độ chính xác — làm sau cùng, sau khi mục 4 đã chốt.
+- Phase 6 làm cuối vì phụ thuộc toàn bộ data của các tab khác đã ổn định.
+
+## 6. Ngoài phạm vi (đã xác nhận với người dùng)
+
+Mảng **"Cảnh báo"** phát hiện thêm ở `Mô tả logic công thức.xlsx` sheet 2 — gồm:
+
+- Cấu hình ngưỡng cảnh báo bằng phương pháp thống kê (Percentile / Z-score / IQR trên tập mẫu "so với kỳ trước" S1 và "so với trung bình ngành" S2).
+- Dashboard thống kê cảnh báo phát sinh (bộ lọc, thẻ tổng hợp, biểu đồ xu hướng, top 5 dự án rủi ro).
+- Xem chi tiết 1 cảnh báo (header, ngưỡng vs giá trị thực tế, biểu đồ xu hướng, AI insight).
+
+Đây là 1 subsystem lớn, độc lập với "Phân tích chuyên sâu" — theo quyết định của người dùng, **không đưa vào plan này**. Ghi nhận lại để lập kế hoạch riêng khi cần.
