@@ -1,0 +1,155 @@
+{
+	"info": {
+		"_postman_id": "d1960496-2d3b-4324-98c8-133eca23f333",
+		"name": "PTCB - Danh sach du an (Phase 1)",
+		"description": "Curl mau cho phan-tich-chuyen-sau-plan.md muc 2.1. Token JWT o auth cua moi request tu ky bang RSA_PRIVATE_KEY trong .env (chi de test cuc bo).",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "45291844"
+	},
+	"item": [
+		{
+			"name": "Search - danh sach mac dinh",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{jwt_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8085/api/v1/ptcb/du-an/search?page=0&size=20&sortBy=createdAt&sortDir=desc",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8085",
+					"path": [
+						"api",
+						"v1",
+						"ptcb",
+						"du-an",
+						"search"
+					],
+					"query": [
+						{
+							"key": "page",
+							"value": "0"
+						},
+						{
+							"key": "size",
+							"value": "20"
+						},
+						{
+							"key": "sortBy",
+							"value": "createdAt"
+						},
+						{
+							"key": "sortDir",
+							"value": "desc"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Search - loc theo keyword + linhVuc",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{jwt_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8085/api/v1/ptcb/du-an/search?keyword=DA-100010&linhVuc=hanh chinh&page=0&size=5",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8085",
+					"path": [
+						"api",
+						"v1",
+						"ptcb",
+						"du-an",
+						"search"
+					],
+					"query": [
+						{
+							"key": "keyword",
+							"value": "DA-100010"
+						},
+						{
+							"key": "linhVuc",
+							"value": "hanh chinh"
+						},
+						{
+							"key": "page",
+							"value": "0"
+						},
+						{
+							"key": "size",
+							"value": "5"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get detail - theo projectId",
+			"request": {
+				"auth": {
+					"type": "bearer",
+					"bearer": [
+						{
+							"key": "token",
+							"value": "{{jwt_token}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:8085/api/v1/ptcb/du-an/100010",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8085",
+					"path": [
+						"api",
+						"v1",
+						"ptcb",
+						"du-an",
+						"100010"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "jwt_token",
+			"value": "{{supabase_service_role_api_key_1708}}"
+		},
+		{
+			"key": "supabase_service_role_api_key_1708"
+		}
+	]
+}
