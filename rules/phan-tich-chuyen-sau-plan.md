@@ -1,11 +1,11 @@
 # Phân tích chuyên sâu dự án — Phân tích nghiệp vụ & Kế hoạch triển khai
 
 > Nguồn:
-> - `.claude/tasks/phantichchuyensau.docx` (mục 6.1–6.3 của tài liệu đặc tả nghiệp vụ/giao diện)
-> - `.claude/tasks/100 dòng bc.xlsx` (data mẫu thật của bảng báo cáo nguồn)
-> - `.claude/tasks/Mô tả logic công thức.xlsx` (spec công thức chi tiết theo từng mẫu báo cáo, 3 sheet)
-> - `.claude/tasks/schema_fixed.sql` (**bản đề xuất DB** từ phía đối tác/khách hàng — không phải bản chốt, được phép điều chỉnh theo nghiệp vụ thực tế)
-> - `.claude/tasks/db_analysis_sample.sql` (dump thực tế của schema `schema_fixed.sql` đã load lên DB `test`, kèm data mẫu ~100 dự án — dùng để kiểm chứng schema đề xuất đối chiếu với data thật)
+> - `.claude/tasks/phantichchuyensau/phantichchuyensau.docx` (mục 6.1–6.3 của tài liệu đặc tả nghiệp vụ/giao diện)
+> - `.claude/tasks/phantichchuyensau/100 dòng bc.xlsx` (data mẫu thật của bảng báo cáo nguồn)
+> - `.claude/tasks/phantichchuyensau/Mô tả logic công thức.xlsx` (spec công thức chi tiết theo từng mẫu báo cáo, 3 sheet)
+> - `.claude/tasks/phantichchuyensau/schema_fixed.sql` (**bản đề xuất DB** từ phía đối tác/khách hàng — không phải bản chốt, được phép điều chỉnh theo nghiệp vụ thực tế)
+> - `.claude/tasks/phantichchuyensau/db_analysis_sample.sql` (dump thực tế của schema `schema_fixed.sql` đã load lên DB `test`, kèm data mẫu ~100 dự án — dùng để kiểm chứng schema đề xuất đối chiếu với data thật)
 >
 > **Phạm vi của file này: chỉ phần "Phân tích chuyên sâu"** (mục 6.1–6.3 của docx). Phần "Cảnh báo"
 > (cấu hình ngưỡng thống kê, dashboard cảnh báo, chi tiết cảnh báo — phát hiện thêm ở
