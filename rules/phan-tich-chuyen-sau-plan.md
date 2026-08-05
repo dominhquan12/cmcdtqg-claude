@@ -3,7 +3,7 @@
 > Nguồn:
 > - `.claude/tasks/phantichchuyensau/phantichchuyensau.docx` (mục 6.1–6.3 của tài liệu đặc tả nghiệp vụ/giao diện)
 > - `.claude/tasks/phantichchuyensau/100 dòng bc.xlsx` (data mẫu thật của bảng báo cáo nguồn)
-> - `.claude/tasks/phantichchuyensau/Mô tả logic công thức.xlsx` (spec công thức chi tiết theo từng mẫu báo cáo, 3 sheet)
+> - `.claude/tasks/phantichchuyensau/Mô tả logic công thức.xlsx` (spec công thức chi tiết theo từng mẫu báo cáo, **4 sheet** — cập nhật 2026-08-05, thêm sheet "Biến số khả dụng"; xem mục 3.3)
 > - `.claude/tasks/phantichchuyensau/schema_fixed.sql` (**bản đề xuất DB** từ phía đối tác/khách hàng — không phải bản chốt, được phép điều chỉnh theo nghiệp vụ thực tế)
 > - `.claude/tasks/phantichchuyensau/db_analysis_sample.sql` (dump thực tế của schema `schema_fixed.sql` đã load lên DB `test`, kèm data mẫu ~100 dự án — dùng để kiểm chứng schema đề xuất đối chiếu với data thật)
 >
@@ -89,7 +89,7 @@ Thông tin chung của dự án + kỳ báo cáo hiện tại, ánh xạ tới *
 2. **AI insight xuất hiện ở 7/10 vùng** — luôn theo pattern "gọi API LLM ngoài, truyền context, nhận về text". Cần 1 service/client LLM dùng chung.
 3. **Nhiều công thức tính rõ ràng, unit-test được** — tách thành pure calculator/service riêng theo từng nhóm chỉ tiêu.
 4. **Tab Gợi ý phụ thuộc dữ liệu tab Rủi ro** — cần backend trả flag `hasCriticalOrHighRisk`.
-5. Mọi bảng "kỳ trước/kỳ này/N kỳ gần nhất" phụ thuộc **loại báo cáo gần nhất là quý hay năm** — cần khái niệm "kỳ" trừu tượng xuyên suốt service layer.
+5. Mọi bảng "kỳ trước/kỳ này/N kỳ gần nhất" phụ thuộc **loại báo cáo gần nhất là quý hay năm** — cần khái niệm "kỳ" trừu tượng xuyên suốt service layer. **1 dự án có song song 2 luồng báo cáo** (4 báo cáo quý/năm + 1 báo cáo năm) — "cùng kỳ" phải so quý-với-quý hoặc năm-với-năm theo đúng loại của báo cáo gần nhất, KHÔNG được lấy N bản ghi mới nhất theo ngày nộp rồi trộn lẫn 2 loại (**Phase 2/3 code lần đầu đã mắc lỗi này** — `findTop2/4/5ByProjectId...Desc` không lọc theo loại kỳ; đã sửa bằng `KyBaoCaoResolver` — xem Phase 2/3 status bên dưới).
 
 ### 2.3. Xuất báo cáo (6.3)
 
@@ -134,10 +134,16 @@ Nội dung đề xuất (schema Postgres `test`): `dm_nganh`, `dm_ky_bao_cao`, `
 4. `LoaiKy` không nên copy trực tiếp từ bảng nguồn — phải suy ra từ `LoaiBaoCaoId` + field trong JSON khi ETL (mục 3.4, điểm 5).
 5. Về convention: nếu tiếp tục trong module `ptcb`, cần dịch tên bảng sang đúng style đang dùng (`BaseAudit`, tên entity Java PascalCase, ví dụ `DmDuAn`/`BcDinhKy`/`AiInsight`...) — bản đề xuất dùng `created_at/updated_at` kiểu tiếng Anh, khác với `BaseAudit` (`ngay_tao`, `ngay_sua`, `da_xoa`, `id_nguoi_tao`, `id_nguoi_sua`).
 
-### 3.3. Spec công thức chi tiết (`Mô tả logic công thức.xlsx`, sheet 1 & 3) — nguồn tham chiếu chính khi code
+### 3.3. Spec công thức chi tiết (`Mô tả logic công thức.xlsx`, 4 sheet) — nguồn tham chiếu chính khi code
 
-- **Sheet 1** (~110 dòng công thức): với mỗi thành phần UI, liệt kê công thức + mapping field chi tiết cho **cả 5 mẫu báo cáo** — chính xác và đầy đủ hơn hẳn phần mô tả trong docx. Khi 2 nguồn (docx vs sheet này) mâu thuẫn, **ưu tiên sheet này**.
-- **Sheet 3** (data dictionary): ma trận **Nhóm chỉ tiêu × Chỉ tiêu × Mẫu báo cáo × (Kỳ báo cáo / Lũy kế GCNDT)** — dùng làm bảng tham chiếu field mapping duy nhất khi viết mapper/ETL.
+> **Cập nhật 2026-08-05**: file được bổ sung thêm sheet thứ 4 "Biến số khả dụng" (trước đó chỉ có
+> 3 sheet). Tên sheet thật trong file (theo thứ tự tab): "Phân tích chuyên sâu" (= sheet 1 dưới
+> đây), "Cấu hình cảnh báo" (= sheet 2, ngoài phạm vi), "Nhóm chỉ tiêu - chỉ tiêu" (= sheet 3),
+> "Biến số khả dụng" (= sheet 4, mới).
+
+- **Sheet 1 – "Phân tích chuyên sâu"** (~110 dòng công thức): với mỗi thành phần UI, liệt kê công thức + mapping field chi tiết cho **cả 5 mẫu báo cáo** — chính xác và đầy đủ hơn hẳn phần mô tả trong docx. Khi 2 nguồn (docx vs sheet này) mâu thuẫn, **ưu tiên sheet này**.
+- **Sheet 3 – "Nhóm chỉ tiêu - chỉ tiêu"** (data dictionary): ma trận **Nhóm chỉ tiêu × Chỉ tiêu × Mẫu báo cáo × (Kỳ báo cáo / Lũy kế GCNDT)** — dùng làm bảng tham chiếu field mapping duy nhất khi viết mapper/ETL.
+- **Sheet 4 – "Biến số khả dụng"** (mới): danh sách tên hiển thị ↔ tên field snake_case cho toàn bộ cột chuẩn hoá của `bc_dinh_ky` (17 biến, VD "Tổng vốn đầu tư đăng ký" → `tong_von_dau_tu_dang_ky`, "Lợi nhuân kỳ báo cáo" → `loi_nhuan`...). Đây chính là **spec đặt tên cột chính thức cho `bc_dinh_ky`** — đối chiếu lại thì entity `BcDinhKy` (đã code ở Phase 0) **khớp 100%** với danh sách này, không cần sửa entity.
 - Sheet 2 (cấu hình ngưỡng cảnh báo, dashboard, chi tiết cảnh báo) — thuộc phần "Cảnh báo", ngoài phạm vi (mục 6).
 
 ### 3.4. Rủi ro/gap nghiệp vụ mới phát hiện (ảnh hưởng trực tiếp tới UI đã đặc tả trong docx)
@@ -147,6 +153,22 @@ Nội dung đề xuất (schema Postgres `test`): `dm_nganh`, `dm_ky_bao_cao`, `
 3. **Điểm rủi ro nhóm "Tài chính" chia theo số chỉ tiêu khác nhau theo từng mẫu** (chia 4, 7, hoặc 8 tuỳ mẫu, không phải hằng số cố định) — công thức: số chỉ tiêu có Xu hướng giảm × (10 / số chỉ tiêu khả dụng của mẫu đó). Cần bảng cấu hình hoặc tính động số chỉ tiêu có dữ liệu, không hard-code chia 8.
 4. **Ý nghĩa cột `cotA`/`cotB`/`cotC` KHÔNG giống nhau giữa các mẫu**: mẫu 103/114 → cotA=kỳ, cotC=lũy kế GCNDT (cotB không dùng); mẫu 37/116 → cotA=kỳ, cotB=lũy kế (không có cotC). → Mapper/ETL phải viết riêng theo `LoaiBaoCaoId`.
 5. **`LoaiKy` trên bảng nguồn không đáng tin cậy** (rỗng/NULL trong toàn bộ data mẫu) — kỳ báo cáo (quý/năm) phải tự suy ra từ `LoaiBaoCaoId` (103,114→quý; 37,116→năm; 89→năm theo `NgayNop`), không đọc trực tiếp cột `LoaiKy`.
+6. **(mới, 2026-08-05) Mẫu 89 không có field nguồn cho "Tổng mức đầu tư"** — sheet 1 dòng "Tổng mức đầu tư" ghi rõ mẫu 89 "(không có trong NoiDungChiTiet, sẽ check trong dữ liệu Dự án)". Ảnh hưởng: 1/5 KPI card ở header (mục 2.2.a) không có nguồn cho dự án ODI — service tính KPI phải trả `null`/"-" thay vì lỗi, không giả định field luôn có giá trị.
+7. **(mới, 2026-08-05) Công thức "Tỷ lệ giải ngân" của mẫu 89 bị cắt cụt ngay trong sheet 1** — nội dung cell chỉ có `[Σ(vonChuyenRa.(tien+mayMocThietBi+taiSanKhac).giaTri.luyKe) / ` (thiếu mẫu số, không phải lỗi khi đọc file — đã kiểm tra lại raw XML của xlsx để loại trừ khả năng cắt do công cụ đọc). Kết hợp với điểm 6 (không có "Tổng mức đầu tư" làm mẫu số hiển nhiên), công thức này **chưa đủ để code** — cần hỏi lại BA.
+8. **(mới, 2026-08-05) Mẫu 89 không có field nguồn cho "Đơn vị quản lý"** — sheet 1 dòng "Đơn vị quản lý" ghi mẫu 89 "Không có trường tương ứng — Có thể lấy từ phân hệ Dự án theo mã dự án". Khớp với thiết kế hiện tại: `dm_du_an.ten_tckt` được cache sẵn ở bảng dự án (Phase 1), nên tab Header không cần lo field này thiếu ở `bc_dinh_ky` — chỉ cần đọc từ `DmDuAn`, không đọc từ báo cáo.
+9. **(mới, 2026-08-05) Nội bộ sheet 1 có mâu thuẫn ở công thức điểm rủi ro Tài chính**: mô tả cho mẫu 116 vừa nói "tính theo 7 chỉ tiêu... 10/7" vừa kết luận "tổng điểm rủi ro = ... × 10/8" (7 vs 8); mẫu 89 vừa nói "tính theo 4 chỉ tiêu... 10/4" vừa kết luận "× 10/5" (4 vs 5). Không chặn thiết kế hiện tại (Phase 3 đã chọn hướng "đếm số chỉ tiêu tài chính có dữ liệu thật, không hard-code hằng số" — mục 3.4 điểm 3), nhưng cần **chốt số chính xác với BA** trước khi viết unit test cho risk-score Tài chính ở Phase 3.
+10. **(mới, 2026-08-05) "Thuế và nộp ngân sách" không nằm trong 8 chỉ tiêu hiển thị ở tab Tài chính** — dù có cột chuẩn hoá riêng (`bc_dinh_ky.thue_va_nop_ngan_sach_ky`) và được sheet 1 dòng 19 liệt kê là field lấy cho mẫu 103/114/37/116, ảnh mock thật (`tai-chinh.png`) và mô tả "mặc định 8 chỉ tiêu" đầu dòng 19 đều không có nó. Cần hỏi BA field này hiển thị ở đâu (nếu có).
+11. **(mới, 2026-08-05) `dm_du_an` chưa có field "thời hạn hoạt động" (số năm) của dự án** — cần cho công thức "Kế hoạch kỳ (tỷ)" ở tab Vốn & Giải ngân (sheet 1 dòng 61: `tổng mức đầu tư / (số năm hoạt động × 4) × số quý đã hoạt động`). Không phải `ngayCapGcndt` (ngày cấp, không phải thời hạn). Nhiều khả năng cùng nguồn với `linhVuc`/`diaBan`/`tenTckt` (phân hệ Dự án ngoài). Đang trả `null` cho `keHoachKy`/`chenhLech` ở tab này.
+
+> **Ghi chú thiết kế đã chốt ngầm ở Phase 0 (chưa từng viết ra, bổ sung ở đây cho rõ)**: entity
+> `BcDinhKy` không lưu trực tiếp `LoaiBaoCaoId` (103/37/116/114/89) — thay vào đó suy ra "mẫu nào"
+> từ cặp `loaiDuAn` (DDI/FDI/ODI) × loại kỳ của `kyKey` (QUY/NAM), theo giả thuyết ánh xạ 1-1:
+> DDI+QUY→103, DDI+NAM→37, FDI+QUY→114, FDI+NAM→116, ODI→89 (luôn NAM, suy từ `NgayNop` theo điểm
+> 5 ở trên). **Đây là giả thuyết suy luận từ cấu trúc dữ liệu, CHƯA được BA xác nhận trực tiếp** —
+> `ma_bao_cao` gốc (`FDI_AIII1_548`...) có thể mã hoá mẫu theo cách khác mà data mẫu hiện có không
+> đủ để kiểm chứng dứt khoát. Dùng tạm cho Phase 2 (hiển thị "nguồn trích dẫn" ở tab Tổng quan), cần
+> chốt lại với BA trước khi phụ thuộc nó cho logic quan trọng hơn (VD chọn công thức rủi ro Tài
+> chính ở Phase 3).
 
 ## 4. Điểm cần làm rõ (cập nhật theo ngữ cảnh mới)
 
@@ -161,27 +183,38 @@ Nội dung đề xuất (schema Postgres `test`): `dm_nganh`, `dm_ky_bao_cao`, `
 | 7 | Ngưỡng cấu hình động (rủi ro, gợi ý...) | **Ra khỏi phạm vi** — thuộc mảng "Cảnh báo", xem mục 6 |
 | 8 (mới) | "Vốn khác" không có nguồn dữ liệu — bỏ hay giữ UI? | Mở (mục 3.4.1) |
 | 9 (mới) | Chấp nhận 2/4 trạng thái tiến độ cho báo cáo trong nước, hay cần nguồn dữ liệu khác? | Mở (mục 3.4.2) |
+| 10 (mới 2026-08-05) | KPI "Tổng mức đầu tư" và công thức "Tỷ lệ giải ngân" của mẫu 89 (ODI) không có nguồn field rõ ràng | Mở (mục 3.4 điểm 6–7) — Phase 2 tạm trả `null`/"-" cho dự án ODI |
+| 11 (mới 2026-08-05) | Số chỉ tiêu chia trong công thức điểm rủi ro Tài chính của mẫu 116 (7 hay 8) và mẫu 89 (4 hay 5) — sheet 1 tự mâu thuẫn | Mở (mục 3.4 điểm 9) — chặn unit test chính xác của Phase 3, không chặn Phase 2 |
+| 12 (mới 2026-08-05) | Suy luận "mẫu nào" (103/37/116/114/89) từ `loaiDuAn`×loại kỳ có đúng 100% không, hay `ma_bao_cao` gốc mã hoá khác? | Mở (mục 3.4, ghi chú sau điểm 9) |
+| 13 (mới 2026-08-05) | "Thuế và nộp ngân sách" có cột chuẩn hoá riêng nhưng không hiển thị ở tab Tài chính (theo ảnh mock) — hiển thị ở đâu khác, hay không dùng? | Mở (mục 3.4 điểm 10) |
+| 14 (mới 2026-08-05) | `dm_du_an` chưa có field "thời hạn hoạt động dự án" (số năm theo giấy phép) — cần cho "Kế hoạch kỳ (tỷ)" ở tab Vốn & Giải ngân | Mở (mục 3.4 điểm 11) — tạm trả `null` cho `keHoachKy`/`chenhLech` |
 
 ## 5. Đề xuất kế hoạch triển khai (theo `docs/clean_architecture_guide.md` & convention `com.ai.ptcb`)
 
 Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng Việt, audit thủ công qua `UserContext.getTaiKhoanId()`.
 
-### Phase 0 — Chốt open questions (mục 4) + thiết kế DB
+### Phase 0 — Chốt open questions (mục 4) + thiết kế DB — **ĐÃ XONG**
 
 - Dùng `schema_fixed.sql` làm **điểm khởi đầu tham khảo**, không copy nguyên — thiết kế lại entity theo 5 điều chỉnh ở mục 3.2 và điền `BaseAudit`.
-- Entity dự kiến: `DuAn`, `BcDinhKy` (JSONB raw + cột chuẩn hoá, ETL riêng theo `LoaiBaoCaoId`), `AiInsight`, `BcRuiRoChiTiet`, `BcTuanThuChiTiet` (+ `NghiaVuTuanThu`), `BcDuBao`, `BcChiTieuTrungBinh`, `DmNganh`, `DmKyBaoCao`.
-- Thêm cấu hình "số chỉ tiêu tài chính theo mẫu" (mục 3.4.3) nếu không muốn hard-code trong service.
+- Entity đã code: `DmDuAn`, `BcDinhKy` (JSONB raw + cột chuẩn hoá — cột chuẩn hoá đã khớp 100% với sheet 4 "Biến số khả dụng", xem mục 3.3), `AiInsight`, `BcRuiRoChiTiet`, `BcTuanThuChiTiet` (+ `DmNghiaVuTuanThu`), `BcDuBao`, `BcChiTieuTrungBinh`, `DmNganh`, `DmKyBaoCao` — tất cả ở `com.ai.ptcb.domain.entity`, kèm repository (Spring Data JPA, chưa có query method riêng ngoài Phase 1/2). Seed data mẫu ở `PhanTichChuyenSauSeedInitializer` (đọc từ `db/seed/phan-tich-chuyen-sau-sample-data.sql`).
+- ETL ghi từ `NoiDungChiTiet` (raw JSON) → cột chuẩn hoá của `bc_dinh_ky` theo từng `LoaiBaoCaoId` **chưa code** — đây là open question #2 (cơ chế đồng bộ từ bảng `BaoCao` nguồn), tách riêng khỏi Phase 2. Phase 2 đọc thẳng cột chuẩn hoá đã có sẵn trong `bc_dinh_ky` (qua seed data), không phụ thuộc ETL.
+- Cấu hình "số chỉ tiêu tài chính theo mẫu" (mục 3.4.3) — chưa thêm, để dành cho Phase 3 (risk-score Tài chính).
 
-### Phase 1 — Danh sách dự án (6.1)
+### Phase 1 — Danh sách dự án (6.1) — **ĐÃ XONG**
 
-- Repository + service đọc `DuAn` (paginate, search, filter).
-- Controller `GET /api/PhanTichChuyenSau/DuAn` với `@Permission`.
+- `DmDuAnController`/`DmDuAnService`/`DmDuAnRepository`: search (keyword + 4 filter optional) có phân trang, get-detail, và endpoint `GET /filter-options` (danh mục distinct cho 4 select box lọc nâng cao).
 
-### Phase 2 — Header + KPI card + Tab Tổng quan (6.2.a, 6.2.b)
+### Phase 2 — Header + KPI card + Tab Tổng quan (6.2.a, 6.2.b) — **đã code xong bản đầu, đối chiếu ảnh mock 2026-08-05**
 
-- Mapper riêng theo từng `LoaiBaoCaoId` (103/37/116/114/89) — bám sát mục 3.3 (sheet 1+3), **không dùng docx làm nguồn công thức**.
-- Calculator riêng cho từng KPI, pure function, dễ unit test.
-- Tab Tổng quan: ghép 4 đoạn mô tả + gọi LLM client (rule-based fallback).
+- Mapper riêng theo từng `LoaiBaoCaoId` (103/37/116/114/89): **không cần** ở Phase 2 vì ETL (mục Phase 0) chưa code — Phase 2 đọc thẳng cột chuẩn hoá sẵn có trên `bc_dinh_ky`, vốn đã template-agnostic (ETL tương lai sẽ chịu trách nhiệm quy đổi cotA/cotB/cotC theo từng mẫu về đúng 1 cột chuẩn hoá).
+- Calculator riêng cho từng KPI, pure function, dễ unit test — xem `com.ai.ptcb.application.service.calculator.KpiCalculator`.
+- KPI "Tổng mức đầu tư"/"Tỷ lệ giải ngân" trả `null` cho dự án ODI (mẫu 89) — xem mục 3.4 điểm 6–7, mục 4 #10.
+- Đối chiếu với `.claude/tasks/phantichchuyensau/images/chi-tiet-tong-quan.png` (2026-08-05): header ban đầu thiếu `diaBan`, thiếu `ngayNhanBcGanNhat` (ảnh cần 2 mốc ngày khác nhau: "Ngày nhận" vs "Thời điểm chốt số liệu" — cả 2 field đã có sẵn trên `bc_dinh_ky`), KPI Tuân thủ thiếu tổng số nghĩa vụ (`tongSoNghiaVuTuanThu`) — cả 3 đã bổ sung. "Nguồn trích dẫn" cũng đã làm giàu thêm (mã báo cáo + tên TCKT + kỳ), nhưng tên loại báo cáo chính thức vẫn cần field `ten_bao_cao` map từ bảng `LoaiBaoCaos` ngoài hệ thống (mục 3.2 điểm 1) — hiện tạm dùng tên mẫu suy luận thay thế.
+- 2 điểm phát hiện thêm từ ảnh mock, **đã xác nhận với người dùng: chờ Phase 5 (LLM client) mới xử lý**, không sửa rule-based thêm ở Phase 2:
+  - KPI "Tiến độ thực tế" trong ảnh hiển thị 1 kỳ (VD "Quý IV/2023") làm giá trị chính + nhãn trạng thái là dòng phụ — khác thiết kế hiện tại (chỉ trả nhãn trạng thái). Có thể do data giả trong mock, cần xác nhận lại khi có LLM/insight thật.
+  - Đoạn "Tiến độ thực hiện" và "Khó khăn, vướng mắc" ở tab Tổng quan trong ảnh là 2 nội dung khác nhau, nhưng bản rule-based hiện tại lấy chung 1 nguồn `bc_dinh_ky.kho_khan_vuong_mac` cho cả 2 → trùng nội dung. Sẽ tách bằng LLM insight riêng cho "Tiến độ thực hiện" ở Phase 5.
+- Tab Tổng quan: ghép 4 đoạn mô tả, rule-based (chưa gọi LLM — client dùng chung vẫn là open question #5, để dành Phase 5).
+- **(sửa lỗi, 2026-08-05) "Kỳ này/kỳ trước" ban đầu KHÔNG lọc theo loại kỳ** — dùng `findTop2ByProjectIdOrderByNgayNopBaoCaoDescReportIdDesc` lấy 2 bản ghi mới nhất bất kể quý/năm, nên nếu dự án vừa nộp báo cáo năm ngay sau báo cáo quý IV thì "kỳ trước" sẽ lấy nhầm báo cáo quý thay vì báo cáo năm liền trước (hoặc ngược lại) — người dùng phát hiện qua nhận xét "1 dự án sẽ có 4 báo cáo quý và 1 báo cáo năm, cùng kỳ là so sánh cùng quý hoặc cùng năm". Đã sửa: thêm `KyBaoCaoResolver`/`KyBaoCaoResolverImpl` (`com.ai.ptcb.application.service`) — xác định loại kỳ (quý/năm) của báo cáo mới nhất, rồi chỉ lấy N báo cáo gần nhất **cùng loại kỳ đó** qua `BcDinhKyRepository.findByProjectIdAndLoaiKy` (JPQL, lọc qua subquery `dm_ky_bao_cao.loai_ky`). Áp dụng cho cả tab Tổng quan (Phase 2) lẫn Tài chính/Vốn & Giải ngân/Tiến độ (Phase 3) — xem các mục bên dưới.
 
 ### Phase 3 — Tab theo từng nhóm chỉ tiêu (Tài chính, Vốn & Giải ngân, Tiến độ, Tuân thủ, Rủi ro)
 
@@ -189,6 +222,30 @@ Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng 
 - Tiến độ: xử lý rõ trường hợp chỉ 2/4 trạng thái khả dụng cho báo cáo trong nước (mục 3.4.2) — cần quyết định nghiệp vụ trước khi code UI cho 4 trạng thái.
 - Vốn & Giải ngân: xử lý "Vốn khác" theo quyết định ở mục 3.4.1.
 - Rủi ro: trả flag `hasCriticalOrHighRisk` cho tab Gợi ý.
+
+#### Tab Tài chính — **đã code xong** (2026-08-05)
+
+- `TabTaiChinhService`/`Impl` mới, cùng nhóm với `ChiTietDuAnController` (`GET .../chi-tiet/tai-chinh`). Lấy kỳ này/kỳ trước qua `KyBaoCaoResolver.layNBaoCaoGanNhatCungLoaiKy(projectId, 2)` — đã sửa để chỉ so cùng loại kỳ (quý/năm), xem ghi chú sửa lỗi ở Phase 2.
+- 8 chỉ tiêu tài chính cố định — enum `ChiTieuTaiChinh` (`com.ai.ptcb.application.service.calculator`), mỗi giá trị gắn kèm hàm lấy field tương ứng trên `BcDinhKy` (Doanh thu, Lợi nhuận, Lợi nhuận sau thuế, Nguồn thu khác, Giá trị XK, Giá trị NK, Chi phí R&D, Chi phí môi trường). Chỉ tiêu không có dữ liệu ở CẢ 2 kỳ thì ẩn khỏi response (đúng rule "nếu báo cáo không có → không hiển thị" — sheet 1 dòng 19).
+- Công thức % biến động + xu hướng (Tăng/Giảm) + nhận định rule-based (chỉ tiêu biến động mạnh nhất) — `TaiChinhCalculator`, pure function.
+- **(mới, phát hiện khi đối chiếu `.claude/tasks/phantichchuyensau/images/tai-chinh.png`) "Thuế và nộp ngân sách" (`bc_dinh_ky.thue_va_nop_ngan_sach_ky`) KHÔNG nằm trong 8 chỉ tiêu hiển thị ở tab này** — dù sheet 3 (data dictionary) liệt kê nó là 1 chỉ tiêu tài chính hợp lệ có cột chuẩn hoá riêng, và cột mẫu-cụ-thể của sheet 1 dòng 19 (mẫu 103/114/37/116) lại liệt kê "thuế&ngân sách nhà nước" như 1 trong số field được lấy. Ảnh mock thật (8 dòng bar chart + bảng) khớp chính xác với mô tả "mặc định 8 chỉ tiêu" ở đầu dòng 19 (không có thuế&ngân sách), nên ưu tiên theo ảnh + mô tả mặc định, bỏ "Thuế và nộp ngân sách" khỏi tab này. **Cần hỏi lại BA**: field này hiển thị ở đâu khác, hay chỉ dùng nội bộ cho tab khác (VD Vốn & Giải ngân) không hiển thị trực tiếp?
+- **Lưu ý về độ tin cậy của ảnh mock**: ảnh `tai-chinh.png` hiển thị đồng thời cả 8 chỉ tiêu có giá trị (kể cả "Lợi nhuận"/"Nguồn thu khác" — theo sheet 3 chỉ mẫu 89/ODI mới có — LẪN "Giá trị XK/NK"/"R&D"/"Môi trường" — theo sheet 3 chỉ mẫu trong nước 37/116 mới có), là tổ hợp **không thể xảy ra thật** với 1 báo cáo/mẫu cụ thể (không mẫu nào có đủ cả 8). Nội dung "Nhận định (AI Insights)" trong ảnh ("Chi phí tài chính tăng 28%...") cũng không khớp số liệu ở bảng phía trên cùng ảnh. Kết luận: ảnh mock chỉ đáng tin về **cấu trúc UI** (có đủ 8 slot, layout bar chart + bảng + insight), KHÔNG đáng tin về **tính nhất quán của số liệu mẫu** — code đã bám theo cấu trúc, không cố khớp số liệu/văn bản mẫu trong ảnh.
+
+#### Tab Vốn & Giải ngân — **đã code xong** (2026-08-05)
+
+- `TabVonGiaiNganService`/`Impl` mới (`GET .../chi-tiet/von-giai-ngan`). Dùng `KyBaoCaoResolver.layNBaoCaoGanNhatCungLoaiKy(projectId, 4)` cho biểu đồ "Cơ cấu nguồn vốn theo kỳ" (≤4 kỳ CÙNG loại kỳ, thứ tự tăng dần) — xem ghi chú sửa lỗi ở Phase 2.
+- 3 hạng mục cố định của bảng "Chi tiết tình hình góp vốn" — enum `HangMucGopVon` (Vốn góp chủ sở hữu, Vốn vay, Lợi nhuận tái đầu tư — **không có** Vốn khác, đúng sheet 1 dòng 59 "fix cứng: vốn góp, vốn vay, lợi nhuận tái đầu tư").
+- Công thức tổng cộng/tỷ trọng/chênh lệch/nhận định rule-based — `VonGiaiNganCalculator`, pure function. "Tỷ lệ đạt (%)" tái dùng nguyên `KpiCalculator.tyLeGiaiNgan` (cùng công thức với KPI card ở header — không viết lại).
+- **"Vốn khác" (%) trả cứng = 0** trong `coCauTheoKy`/`coCauKyGanNhat` (biểu đồ theo kỳ + donut) vì không có nguồn dữ liệu ở bất kỳ mẫu nào (mục 3.4.1, mục 4 #8 — **vẫn mở với BA**, chưa tự quyết định bỏ hẳn field khỏi response).
+- **(mới, 2026-08-05) Gap mới phát hiện khi code "Kế hoạch kỳ (tỷ)"**: công thức (sheet 1 dòng 61) = `tổng mức đầu tư / (số năm hoạt động × 4) × số quý đã hoạt động` — cần "số năm hoạt động" (thời hạn hoạt động dự án theo giấy phép, tính bằng năm) mà **`dm_du_an` hiện chưa có field này** (không phải `ngayCapGcndt`, mà là tổng thời hạn được phép hoạt động). → `TienDoGiaiNgan.keHoachKy`/`chenhLech` tạm trả `null`, chỉ `thucHien`/`tyLeDat`/`tongMucDauTu` tính được. Xem mục 4 #13 (open question mới) — nhiều khả năng field này cũng lấy từ phân hệ Dự án như `linhVuc`/`diaBan`/`tenTckt`.
+- Đối chiếu `.claude/tasks/phantichchuyensau/images/von-giai-ngan.png`: số liệu ví dụ trong ảnh (Thực hiện 852.5 tỷ / Kế hoạch kỳ 937.5 tỷ → Chênh lệch hiển thị -6,8%) **không khớp** phép tính (Thực hiện−Kế hoạch)/Kế hoạch = -85/937.5 = -9,07%, không phải -6,8% — cùng kiểu số liệu mẫu không nhất quán đã thấy ở ảnh Tổng quan/Tài chính. Không cố khớp số theo ảnh, chỉ bám công thức ở sheet 1.
+
+#### Tab Tiến độ — **đã code xong** (2026-08-05)
+
+- `TabTienDoService`/`Impl` mới (`GET .../chi-tiet/tien-do`). Dùng `KyBaoCaoResolver.layNBaoCaoGanNhatCungLoaiKy(projectId, 5)` — ≤5 kỳ CÙNG loại kỳ, khớp "Bảng dữ liệu tiến độ chi tiết ... tối thiểu 5 kỳ báo cáo gần nhất" (sheet 1 dòng 30) — xem ghi chú sửa lỗi ở Phase 2.
+- `dienBienTienDo` (line chart) trả theo thứ tự **tăng dần** thời gian; `bangChiTiet` (bảng ma trận ✓/✗/⚠/ⓘ) trả theo thứ tự **giảm dần** (kỳ gần nhất lên đầu, `hienTai=true`) — khớp đúng 2 hướng hiển thị khác nhau thấy trong ảnh mock (line chart trái→phải theo thời gian, bảng mới nhất ở trên).
+- Tái dùng `KpiCalculator.nhanTienDo`/`nhanDinhTienDo` (đã tách ra từ Tab Tổng quan ở Phase 2, dùng chung cho cả 2 nơi thay vì viết lại).
+- Nhắc lại gap đã biết (mục 3.4.2, mục 4 #9, **không phải phát hiện mới**): với báo cáo trong nước (mẫu 103/37/116/114), `tienDoTrangThai` chỉ có thể là `dungTienDo`/`khoKhanVuongMac` (rule-based fallback) — 2 cột "Chậm tiến độ"/"Không có khả năng triển khai" trong `bangChiTiet` sẽ luôn `false` với các dự án này. Ảnh mock `tien-do-thuc-hien.png` cho thấy dữ liệu có cả trạng thái "Chậm tiến độ" (dòng "Quý I/2024") — chỉ khả dụng thật với báo cáo có `danhGia.*` (mẫu 89/ODI) hoặc khi có nguồn dữ liệu tốt hơn free-text `khoKhanVuongMac`.
 
 ### Phase 4 — So sánh, Dự báo, Gợi ý (6.2.g–k)
 
