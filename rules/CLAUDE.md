@@ -119,6 +119,15 @@ audit) rather than copying `com.ai.domain`'s.
 - **IDs**: `Long`/`bigint`, except the `ptcb` module's `CbChiTieu`, which is keyed by a human-assigned string
   code (`ma`), not a surrogate id.
 
+## Dev tooling conventions
+
+- **API curl requests**: when asked for a ready-to-use curl for an API endpoint (e.g. to paste into Postman),
+  write the full curl command (including a real, freshly-signed dev JWT where auth is needed — see
+  `docs/authentication_flow.md`) to a file under `.claude/others/curl/`, one file per endpoint, named after the
+  route (e.g. `ptcb-du-an-search.sh`). Don't only paste it inline in chat — long tokens get corrupted by manual
+  copy/paste from a chat code block. `.claude/` is its own git repo (remote `cmcdtqg-claude`), independent of
+  the main project's git history.
+
 ## Deployment
 
 GitLab CI (`.gitlab-ci.yml`) has a single manual `deploy_staging` job, gated on pushes to `staging` and the
