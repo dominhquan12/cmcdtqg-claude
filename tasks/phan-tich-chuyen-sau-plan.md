@@ -5,10 +5,22 @@
 > - `.claude/tasks/100 dòng bc.xlsx` (data mẫu thật của bảng báo cáo nguồn)
 > - `.claude/tasks/Mô tả logic công thức.xlsx` (spec công thức chi tiết theo từng mẫu báo cáo, 3 sheet)
 > - `.claude/tasks/schema_fixed.sql` (**bản đề xuất DB** từ phía đối tác/khách hàng — không phải bản chốt, được phép điều chỉnh theo nghiệp vụ thực tế)
+> - `.claude/tasks/db_analysis_sample.sql` (dump thực tế của schema `schema_fixed.sql` đã load lên DB `test`, kèm data mẫu ~100 dự án — dùng để kiểm chứng schema đề xuất đối chiếu với data thật)
 >
 > **Phạm vi của file này: chỉ phần "Phân tích chuyên sâu"** (mục 6.1–6.3 của docx). Phần "Cảnh báo"
 > (cấu hình ngưỡng thống kê, dashboard cảnh báo, chi tiết cảnh báo — phát hiện thêm ở
 > `Mô tả logic công thức.xlsx` sheet 2) **nằm ngoài phạm vi**, xem mục 6.
+>
+> **RULE TẠM THỜI (2026-08-04)**: khi cần tham chiếu cấu trúc DB để code/thiết kế, dùng
+> **`db_analysis_sample.sql`** làm nguồn tham chiếu chính (schema `schema_fixed.sql` + data mẫu để
+> kiểm chứng thực tế). **CHƯA dùng `phan-tich-chuyen-sau-schema.dbml`** (bản v2 đề xuất sửa) — đối
+> chiếu 2 file cho thấy dbml còn vài điểm chưa khớp với data mẫu thật, cần chốt trước khi chuyển
+> sang dùng làm nguồn chính thức: enum `trang_thai_hoat_dong` thiếu giá trị `ended`/`suspended` xuất
+> hiện trong data mẫu; bảng `cb_nhom_chi_tieu`/`cb_chi_tieu` mà dbml đề xuất FK tới đang **rỗng** (0
+> dòng) trong DB thật; mã "chỉ tiêu" không nhất quán giữa `bc_du_bao.nhom_chi_tieu` (mã chỉ tiêu đơn
+> lẻ, không phải nhóm) và `bc_chi_tieu_trung_binh.chi_tieu` (giữ suffix `_ky`/`_luy_ke_gcndt`); và
+> `ai_insight.tab_nguon` trong data mẫu có giá trị `tuan_thu`, mâu thuẫn với quy tắc "Tuân thủ không
+> có insight AI" ở mục 2.2. Sẽ cập nhật rule này khi các điểm trên được chốt với BA.
 
 ## 1. Tóm tắt tài liệu nguồn
 
