@@ -86,7 +86,7 @@ Thông tin chung của dự án + kỳ báo cáo hiện tại, ánh xạ tới *
 
 **Quan sát quan trọng về nghiệp vụ**:
 1. **5 nhóm chỉ tiêu cố định xuyên suốt**: Tài chính, Vốn & Giải ngân, Tiến độ, Tuân thủ, Rủi ro — khớp 1-1 với `CbNhomChiTieu` đã có trong module `ptcb`.
-2. **AI insight xuất hiện ở 7/10 vùng** — luôn theo pattern "gọi API LLM ngoài, truyền context, nhận về text". Cần 1 service/client LLM dùng chung.
+2. **AI insight xuất hiện ở 7/10 vùng** — luôn theo pattern "gọi API LLM ngoài, truyền context, nhận về text". Cần 1 service/client LLM dùng chung. **(Đã xác nhận với BA, 2026-08-06) Cơ chế sinh insight**: KHÔNG gọi LLM đồng bộ ngay trong request đọc tab — có 1 **job async chạy SAU KHI báo cáo đã lưu vào `bc_dinh_ky`**, job này sinh insight (ghi vào `ai_insight`) VÀ dự báo (ghi vào `bc_du_bao`) cho đúng báo cáo đó, gắn theo `report_id`. Vậy tầng đọc (các tab) **chỉ cần SELECT từ `ai_insight`/`bc_du_bao` theo `report_id` (+ `tab_nguon` cho `ai_insight`)**, không tự sinh nhận định — chỉ fallback rule-based khi job async chưa chạy tới (báo cáo vừa lưu, insight chưa kịp sinh) hoặc khi record đã hết hạn (`expired_at`). Đã áp dụng cho tab Tài chính (`TabTaiChinhServiceImpl.sinhNhanDinh`, dùng `AiInsightRepository.findFirstByReportIdAndTabNguonOrderByCreatedAtDesc`) — **các tab khác (Tổng quan, Vốn & Giải ngân, Tiến độ, và sau này Rủi ro/So sánh/Dự báo/Gợi ý) đang còn dùng rule-based thuần, cần áp dụng lại pattern này khi có thời gian** (không tự động áp dụng hết trong 1 lần vì mỗi tab cần xác nhận riêng `tab_nguon` tương ứng).
 3. **Nhiều công thức tính rõ ràng, unit-test được** — tách thành pure calculator/service riêng theo từng nhóm chỉ tiêu.
 4. **Tab Gợi ý phụ thuộc dữ liệu tab Rủi ro** — cần backend trả flag `hasCriticalOrHighRisk`.
 5. Mọi bảng "kỳ trước/kỳ này/N kỳ gần nhất" phụ thuộc **loại báo cáo gần nhất là quý hay năm** — cần khái niệm "kỳ" trừu tượng xuyên suốt service layer. **1 dự án có song song 2 luồng báo cáo** (4 báo cáo quý/năm + 1 báo cáo năm) — "cùng kỳ" phải so quý-với-quý hoặc năm-với-năm theo đúng loại của báo cáo gần nhất, KHÔNG được lấy N bản ghi mới nhất theo ngày nộp rồi trộn lẫn 2 loại (**Phase 2/3 code lần đầu đã mắc lỗi này** — `findTop2/4/5ByProjectId...Desc` không lọc theo loại kỳ; đã sửa bằng `KyBaoCaoResolver` — xem Phase 2/3 status bên dưới).
@@ -134,6 +134,43 @@ Nội dung đề xuất (schema Postgres `test`): `dm_nganh`, `dm_ky_bao_cao`, `
 4. `LoaiKy` không nên copy trực tiếp từ bảng nguồn — phải suy ra từ `LoaiBaoCaoId` + field trong JSON khi ETL (mục 3.4, điểm 5).
 5. Về convention: nếu tiếp tục trong module `ptcb`, cần dịch tên bảng sang đúng style đang dùng (`BaseAudit`, tên entity Java PascalCase, ví dụ `DmDuAn`/`BcDinhKy`/`AiInsight`...) — bản đề xuất dùng `created_at/updated_at` kiểu tiếng Anh, khác với `BaseAudit` (`ngay_tao`, `ngay_sua`, `da_xoa`, `id_nguoi_tao`, `id_nguoi_sua`).
 
+### 3.2bis. Vì sao KHÔNG gộp `dm_ky_bao_cao` vào `bc_dinh_ky` (2026-08-06)
+
+> Câu hỏi hay gặp lại: 2 bảng này trông như thể trùng nhau (đều xoay quanh "kỳ") nên có người sẽ đề
+> xuất gộp cho gọn. **Đừng gộp** — đây là quan hệ dimension (danh mục)/fact (giao dịch) kinh điển,
+> và có 2 bằng chứng nghiệp vụ cụ thể (không chỉ lý thuyết chuẩn hoá suông) cho thấy "kỳ" phải tồn
+> tại độc lập với "báo cáo":
+
+1. **Nghĩa vụ tuân thủ "Nộp báo cáo định kỳ" cần phát hiện dự án CHƯA nộp báo cáo** (sheet 1 dòng
+   31: check `NgayNop` với hạn nộp bc, "trước ngày 10 tháng đầu quý sau"). Muốn biết 1 kỳ đã quá
+   hạn mà dự án chưa nộp báo cáo, kỳ đó phải tồn tại (biết `ngay_ket_thuc`, tính được hạn nộp) **kể
+   cả khi chưa có dòng `bc_dinh_ky` nào tương ứng**. Nếu gộp 2 bảng, kỳ chỉ tồn tại khi có báo cáo
+   → không thể biểu diễn trạng thái "quá hạn, chưa nộp" (mất khả năng phát hiện đúng loại vi phạm
+   này).
+2. **`bc_du_bao` (dự báo) tham chiếu thẳng `dm_ky_bao_cao.ky_key` qua cột `ky_key_du_bao`, KHÔNG có
+   cột `report_id` nào** — vì dự báo luôn nhắm tới 1 kỳ **tương lai**, mà theo định nghĩa kỳ tương
+   lai đó chưa thể có báo cáo thực tế. Nếu gộp 2 bảng, `bc_du_bao` sẽ không có gì để tham chiếu.
+
+**Bằng chứng khác (không phải lý do chính, nhưng cùng hướng)**:
+- Cardinality lệch nhau: `dm_ky_bao_cao` ~1 dòng/kỳ dùng chung toàn hệ thống; `bc_dinh_ky` ~1
+  dòng/(dự án × kỳ). Gộp sẽ lặp lại `nam`/`quy`/`ngay_bat_dau`/`ngay_ket_thuc` ở mọi dòng báo cáo
+  của mọi dự án — sai chuẩn 3NF, sửa 1 kỳ phải update hàng loạt dòng.
+- `AiInsight`, `BcRuiRoChiTiet`, `BcTuanThuChiTiet` đều có cột `ky_key` tham chiếu `dm_ky_bao_cao`
+  độc lập với `bc_dinh_ky` — bảng này là "từ vựng kỳ" dùng chung cho cả domain, không riêng gì báo
+  cáo định kỳ.
+- `dm_ky_bao_cao.thu_tu` tồn tại để sắp thứ tự kỳ theo trình tự thời gian THỰC của kỳ, tách biệt
+  khỏi ngày nộp báo cáo thực tế (có thể nộp trễ/sớm) — 1 khái niệm chỉ có ý nghĩa khi kỳ là 1 bảng
+  riêng.
+
+**Gap phát hiện kèm theo (đáng sửa riêng, không liên quan trực tiếp câu hỏi gộp bảng)**: bản đề
+xuất `db_analysis_sample.sql` có `UNIQUE(project_id, ky_key)` trên `bc_dinh_ky`
+(`uq_bc_dinh_ky`), nhưng entity `BcDinhKy.java` **chưa khai báo lại** constraint này
+(`@Table` không có `uniqueConstraints`). Vì app dùng `hibernate.ddl-auto: update` (sinh schema từ
+entity, không chạy trực tiếp `db_analysis_sample.sql`), DB thật của app **hiện chưa enforce**
+tính duy nhất `(project_id, ky_key)`. Ảnh hưởng cụ thể: `BcTuanThuChiTiet` không có cột
+`report_id` (chỉ có `project_id`+`ky_key`) nên việc join ngược lại đúng 1 báo cáo phụ thuộc hoàn
+toàn vào tính duy nhất này — nên thêm lại `uniqueConstraints` vào entity cho khớp bản tham chiếu.
+
 ### 3.3. Spec công thức chi tiết (`Mô tả logic công thức.xlsx`, 4 sheet) — nguồn tham chiếu chính khi code
 
 > **Cập nhật 2026-08-05**: file được bổ sung thêm sheet thứ 4 "Biến số khả dụng" (trước đó chỉ có
@@ -178,7 +215,7 @@ Nội dung đề xuất (schema Postgres `test`): `dm_nganh`, `dm_ky_bao_cao`, `
 | 2 | Nguồn `bc_dinh_ky`: cơ chế đọc từ bảng `BaoCao` (share DB / API / Kafka)? | **Đã xác nhận nguồn** (mục 3.1); cơ chế đồng bộ vẫn cần chốt |
 | 3 | "Trung bình ngành" tính real-time hay batch? | **Có gợi ý**: bảng `bc_chi_tieu_trung_binh` có `updated_at` → hướng batch; cần chốt job/schedule |
 | 4 | Mô hình dự báo dùng thuật toán nào? | Vẫn mở — `bc_du_bao.model_meta_json` gợi ý có model thật nhưng chưa rõ thuật toán |
-| 5 | LLM client dùng chung có sẵn không? | Vẫn mở |
+| 5 | LLM client dùng chung có sẵn không? | **Đã rõ hướng (2026-08-06)**: không cần LLM client trong app này — có job async riêng (ngoài phạm vi module `ptcb`) sinh insight/dự báo sau khi lưu báo cáo, ghi vào `ai_insight`/`bc_du_bao`; app chỉ cần đọc. Vẫn mở: ai/khi nào trigger job đó (Kafka event? scheduler?). |
 | 6 | Export PNG/zip: server-render hay FE tự capture? | Vẫn mở |
 | 7 | Ngưỡng cấu hình động (rủi ro, gợi ý...) | **Ra khỏi phạm vi** — thuộc mảng "Cảnh báo", xem mục 6 |
 | 8 (mới) | "Vốn khác" không có nguồn dữ liệu — bỏ hay giữ UI? | Mở (mục 3.4.1) |
