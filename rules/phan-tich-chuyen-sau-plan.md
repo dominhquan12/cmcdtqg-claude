@@ -171,6 +171,41 @@ tính duy nhất `(project_id, ky_key)`. Ảnh hưởng cụ thể: `BcTuanThuCh
 `report_id` (chỉ có `project_id`+`ky_key`) nên việc join ngược lại đúng 1 báo cáo phụ thuộc hoàn
 toàn vào tính duy nhất này — nên thêm lại `uniqueConstraints` vào entity cho khớp bản tham chiếu.
 
+### 3.2ter. Bug đã sửa (2026-08-12): `dm_ky_bao_cao.thu_tu` KHÔNG so sánh được xuyên suốt QUY/NAM
+
+**Phát hiện khi nào**: khi build tính năng "Biến động so với kỳ trước" cho thẻ tổng hợp tab Tuân
+thủ (mục 2.2, sheet 1 dòng 39/41/43), cần lấy lũy kế nghĩa vụ tính tới 1 kỳ TRƯỚC kỳ hiện tại — dùng
+lại `BcTuanThuChiTietRepository.findByProjectIdUpToKy` với `kyHienTai` = kỳ báo cáo liền trước. Kiểm
+tra chéo bằng SQL trực tiếp trên DB thật thì phát hiện method này (đã có từ Phase 3, 2026-08-11)
+**đang trả sai số liệu** trong trường hợp phổ biến nhất.
+
+**Nguyên nhân**: method gốc so sánh `k.thu_tu <= thu_tu(kyHienTai)` — đúng như Javadoc cũ của
+`DmKyBaoCao.thuTu` gợi ý ("dùng ORDER BY để lấy N kỳ gần nhất"). Nhưng đối chiếu data thật
+(`dm_ky_bao_cao`) thì `thu_tu` **không phải chuỗi thời gian toàn cục** — nó được sinh theo thứ tự:
+toàn bộ 46 kỳ QUÝ (2015-Q1..2026-Q2) trước (`thu_tu` 1–46), rồi TOÀN BỘ 11 kỳ NĂM
+(2015-NAM..2025-NAM) được chèn vào giữa (`thu_tu` 47–57), rồi các kỳ QUÝ tiếp theo (2026-Q3...) lại
+nối tiếp sau đó (`thu_tu` 58+). Nghĩa là **so sánh `thu_tu` giữa 1 kỳ QUÝ và 1 kỳ NĂM luôn sai** —
+VD kỳ "2019-NAM" (`thu_tu`=51) bị coi là "sau" kỳ "2026-Q2" (`thu_tu`=46), dù 2019 cách rất xa
+trong quá khứ so với 2026.
+
+**Hệ quả cụ thể**: vì "kỳ hiện tại" của 1 dự án (`bcDinhKyRepository.findFirstByProjectId...`, báo
+cáo mới nhất theo ngày nộp, không phân biệt loại kỳ) trong đa số trường hợp là 1 báo cáo QUÝ (báo
+cáo quý nộp 4 lần/năm, dễ là báo cáo mới nhất hơn báo cáo năm chỉ nộp 1 lần/năm) — bug này khiến
+**TOÀN BỘ dữ liệu ở kỳ NĂM bị loại khỏi lũy kế tab Tuân thủ trong đa số trường hợp thực tế**, cụ
+thể: nhóm "Tiến độ" (`Nghia vu tien do`, chỉ tính kỳ NĂM theo rule ở mục Phase 3 dưới) gần như LUÔN
+rỗng, và phần nộp báo cáo NĂM của nhóm "Nộp báo cáo định kỳ" cũng bị bỏ sót. Bug này tồn tại từ khi
+build Phase 3 (2026-08-11), không liên quan gì tới các thay đổi mới hôm 2026-08-12 — chỉ tình cờ bị
+phát hiện khi build tính năng "biến động kỳ trước" (lần đầu cần gọi lại method này với 1 kỳ cutoff
+KHÁC kỳ hiện tại, mới lộ ra sự bất nhất khi so sánh chéo loại kỳ).
+
+**Đã sửa**: `findByProjectIdUpToKy` đổi sang so sánh `k.ngay_ket_thuc <= ngay_ket_thuc(kyHienTai)`
+(LocalDate thật, so sánh đúng xuyên suốt mọi loại kỳ) thay vì `thu_tu`. Đã verify lại bằng SQL trực
+tiếp trên DB (dự án 100059): trước khi sửa, lũy kế trả về 4 nghĩa vụ hợp lệ (thiếu nhóm Tiến độ);
+sau khi sửa, trả đúng 5 (đủ cả nhóm Tiến độ). Cập nhật thêm cảnh báo vào Javadoc
+`DmKyBaoCao.thuTu` — chỉ dùng `thu_tu` để so sánh/sắp xếp khi đã lọc cùng 1 `loaiKy` trước (đúng
+cách `KyBaoCaoResolverImpl`/`BcDinhKyRepository.findByProjectIdAndLoaiKy` đang làm), dùng
+`ngayKetThuc` khi cần so sánh xuyên suốt cả 2 loại kỳ.
+
 ### 3.3. Spec công thức chi tiết (`Mô tả logic công thức.xlsx`, 4 sheet) — nguồn tham chiếu chính khi code
 
 > **Cập nhật 2026-08-05**: file được bổ sung thêm sheet thứ 4 "Biến số khả dụng" (trước đó chỉ có
@@ -225,6 +260,8 @@ toàn vào tính duy nhất này — nên thêm lại `uniqueConstraints` vào e
 | 12 (mới 2026-08-05) | Suy luận "mẫu nào" (103/37/116/114/89) từ `loaiDuAn`×loại kỳ có đúng 100% không, hay `ma_bao_cao` gốc mã hoá khác? | Mở (mục 3.4, ghi chú sau điểm 9) |
 | 13 (mới 2026-08-05) | "Thuế và nộp ngân sách" có cột chuẩn hoá riêng nhưng không hiển thị ở tab Tài chính (theo ảnh mock) — hiển thị ở đâu khác, hay không dùng? | Mở (mục 3.4 điểm 10) |
 | 14 (mới 2026-08-05) | `dm_du_an` chưa có field "thời hạn hoạt động dự án" (số năm theo giấy phép) — cần cho "Kế hoạch kỳ (tỷ)" ở tab Vốn & Giải ngân | Mở (mục 3.4 điểm 11) — tạm trả `null` cho `keHoachKy`/`chenhLech` |
+| 15 (mới 2026-08-12) | Công thức điểm rủi ro Vốn & Giải ngân (sheet 1 dòng 84): "số kỳ hoạt động" định nghĩa thế nào (số kỳ theo lịch từ ngày cấp GCNDT, hay số kỳ đã CÓ báo cáo)? | Mở — Phase 3 tạm dùng tổng số báo cáo định kỳ dự án đã nộp (`BcDinhKyRepository.countByProjectId`), xem Javadoc `RuiRoCalculator#diemRuiRoVonGiaiNgan` |
+| 16 (mới 2026-08-12) | Cùng công thức trên: `percentileRank` theo quy ước nào (tỷ lệ ≤ giá trị, hay `PERCENTRANK.INC` kiểu Excel `(hạng-1)/(n-1)`)? | Mở — Phase 3 tạm dùng "tỷ lệ phần tử ≤ giá trị đang xét". Không chặn bởi data mẫu: 100 dự án mẫu hiện có CÙNG giá trị `tong_von_dau_tu_dang_ky` nên percentile luôn ra 1.0, chưa test được biến thiên thật |
 
 ## 5. Đề xuất kế hoạch triển khai (theo `docs/clean_architecture_guide.md` & convention `com.ai.ptcb`)
 
@@ -283,6 +320,47 @@ Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng 
 - `dienBienTienDo` (line chart) trả theo thứ tự **tăng dần** thời gian; `bangChiTiet` (bảng ma trận ✓/✗/⚠/ⓘ) trả theo thứ tự **giảm dần** (kỳ gần nhất lên đầu, `hienTai=true`) — khớp đúng 2 hướng hiển thị khác nhau thấy trong ảnh mock (line chart trái→phải theo thời gian, bảng mới nhất ở trên).
 - Tái dùng `KpiCalculator.nhanTienDo`/`nhanDinhTienDo` (đã tách ra từ Tab Tổng quan ở Phase 2, dùng chung cho cả 2 nơi thay vì viết lại).
 - Nhắc lại gap đã biết (mục 3.4.2, mục 4 #9, **không phải phát hiện mới**): với báo cáo trong nước (mẫu 103/37/116/114), `tienDoTrangThai` chỉ có thể là `dungTienDo`/`khoKhanVuongMac` (rule-based fallback) — 2 cột "Chậm tiến độ"/"Không có khả năng triển khai" trong `bangChiTiet` sẽ luôn `false` với các dự án này. Ảnh mock `tien-do-thuc-hien.png` cho thấy dữ liệu có cả trạng thái "Chậm tiến độ" (dòng "Quý I/2024") — chỉ khả dụng thật với báo cáo có `danhGia.*` (mẫu 89/ODI) hoặc khi có nguồn dữ liệu tốt hơn free-text `khoKhanVuongMac`.
+
+#### Tab Tuân thủ — **đã code xong** (2026-08-11, cập nhật 2026-08-12)
+
+- `TabTuanThuService`/`Impl` mới (`GET .../chi-tiet/tuan-thu`). Số liệu LŨY KẾ từ trước tới kỳ báo cáo gần nhất (khác KPI "Tuân thủ (%)" ở header, Phase 2, chỉ đếm 1 kỳ) — lấy qua `BcTuanThuChiTietRepository.findByProjectIdUpToKy`. Tab này không có insight AI (mục 2.2).
+- Bảng cây cha/con: cha = `tenNhomSnapshot`, con = từng nghĩa vụ đã ghi nhận; "đánh giá" của cha = `vi_pham` nếu có ≥1 con `vi_pham` (suy luận "worst-case", spec không có công thức rollup rõ ràng).
+- **(xác nhận 2026-08-11, đối chiếu sheet "Nhóm chỉ tiêu - chỉ tiêu" dòng 28–29) 2/5 nhóm không có chỉ tiêu con**: "Thủ tục đăng ký cấp tài khoản báo cáo" và "Quy định pháp luật về môi trường, xây dựng và các quy định khác" — cột "Chỉ tiêu" trống trong sheet, công thức luôn là "mặc định tuân thủ" cho cả 5 mẫu báo cáo (khác nhóm Tài chính có 8 chỉ tiêu con, hay nhóm Tiến độ/Nộp báo cáo định kỳ có 1 chỉ tiêu con thật với field + công thức rõ ràng). Đã sửa `TabTuanThuServiceImpl.xayDungNhomTuanThu`: 2 nhóm này luôn trả `danhGia=tuan_thu` + `chiTiet=[]`, KHÔNG rollup từ `bc_tuan_thu_chi_tiet` thật dù có dữ liệu (seed data mẫu hiện có vài dòng `vi_pham` ngẫu nhiên cho nhóm "Thủ tục đăng ký..." — data mẫu chưa khớp rule này, không dùng làm nguồn tin cho 2 nhóm đó).
+- ~~Chưa xử lý (biết nhưng chưa sửa...): `tongSoNghiaVu`/`tongSoTuanThu`/... vẫn tính trên TOÀN BỘ `luyKe` thật, kể cả 2 nhóm mặc định~~ — **ĐÃ CHỐT & SỬA (2026-08-12, xem mục ngay dưới)**: 2 nhóm mặc định giờ hoàn toàn KHÔNG dùng dữ liệu `bc_tuan_thu_chi_tiet` nữa (kể cả cho tổng số), nên gap "tổng lệch bảng cây" này không còn khả năng xảy ra — 2 nguồn giờ tách biệt hoàn toàn, không thể lệch nhau.
+- **(chốt với người dùng 2026-08-12, thay thế hoàn toàn cách làm cũ ở trên) 2 nhóm "mặc định tuân thủ" không dùng `bc_tuan_thu_chi_tiet` nữa — tính từ SỐ BÁO CÁO ĐÃ NỘP**: lý do đổi — nếu 1 dự án tình cờ có 0 dòng `bc_tuan_thu_chi_tiet` cho 1 trong 2 nhóm này (xảy ra thật, VD dự án 100013 không có dòng "Quy dinh phap luat" nào), nhóm đó biến mất hoàn toàn khỏi bảng cây (bug — `xayDungNhomTuanThu` chỉ tạo entry cho nhóm có ≥1 dòng trong `luyKe`). Quy tắc mới: **mỗi báo cáo định kỳ (`bc_dinh_ky`, mọi loại kỳ) dự án đã nộp mặc định coi như đã thoả CẢ 2 nghĩa vụ này** — hoàn toàn không đọc `bc_tuan_thu_chi_tiet` cho 2 nhóm này nữa (loại khỏi `locNghiaVuHopLe` giống nhóm "Tài chính").
+  - Số nghĩa vụ mặc định cộng vào `tongSoNghiaVu`/`tongSoTuanThu` = 2 × (tổng số báo cáo đã nộp lũy kế tới kỳ đang xét, `BcDinhKyRepository.countByProjectIdUpToKy` — mới thêm, so `ngay_ket_thuc` để đúng xuyên suốt QUY/NAM, xem mục 3.2ter). Luôn tuân thủ, không đóng góp vi phạm.
+  - Bảng cây (`xayDungNhomTuanThu`) giờ APPEND CỨNG 2 entry này vào cuối danh sách (không phụ thuộc `luyKe` groupingBy nữa) — đảm bảo LUÔN xuất hiện với mọi dự án đã có ≥1 báo cáo, `chiTiet=[]`.
+  - Áp dụng cho cả kỳ hiện tại lẫn kỳ trước (tính "biến động so với kỳ trước" — mục ngay trên) — dùng đúng số báo cáo lũy kế tại từng mốc cutoff tương ứng.
+- **(xác nhận thêm 2026-08-11, cùng session) 3 rule khác theo nhóm, đã áp dụng ở `TabTuanThuServiceImpl.locNghiaVuHopLe` — lọc TRƯỚC khi tính bất cứ số liệu nào (khác với 2 nhóm ở trên, chỉ sửa ở bảng cây, chưa sửa tổng)**:
+  - Nhóm "Tài chính" (`Nghia vu tai chinh`): chưa có công thức tuân thủ → **loại hoàn toàn** khỏi response, kể cả khỏi `tongSoNghiaVu`/tỷ lệ tổng thể (khác 2 nhóm "mặc định tuân thủ" ở trên — nhóm này không hiện cả trong bảng cây, không có node cha nào tên "Tài chính").
+  - Nhóm "Tiến độ" (`Nghia vu tien do`): chỉ xác định tuân thủ theo báo cáo NĂM — bản ghi ở kỳ QUÝ của nhóm này bị loại khỏi mọi tính toán (tra `dm_ky_bao_cao.loai_ky` theo từng `ky_key`, không dựa trực tiếp `nghia_vu_id` vì đó chỉ là snapshot lịch sử tại thời điểm ghi nhận).
+  - Nhóm "Nộp báo cáo định kỳ" (`Bao cao dinh ky`): NGƯỢC LẠI — lấy toàn bộ báo cáo đã nộp của dự án, không phân biệt quý/năm (hành vi mặc định, không cần lọc thêm — chỉ ghi lại để tránh nhầm đây cũng theo rule "chỉ NĂM" như nhóm Tiến độ).
+- **(cập nhật 2026-08-12) Sheet công thức đổi số dòng + bổ sung công thức "Thực tế ghi nhận" cho 4/5 nhóm — đã code**:
+  - File `Mô tả logic công thức.xlsx` xoá cột "Tên nghĩa vụ" (dòng 46 cũ) và đổi tên bảng thành **"Bảng chi tiết tuân thủ cam kết"**; sheet 1 giờ chỉ còn dòng 47 (Tên nhóm nghĩa vụ), 48 (Trạng thái), 49 (Thực tế ghi nhận). Dòng 49 nêu rõ công thức cho từng nhóm: "Quy định pháp luật..."/"Thủ tục đăng ký..." → mặc định `"Đạt yêu cầu theo quy định"`; "Tiến độ" → `bc_dinh_ky.tien_do_trang_thai + bc_dinh_ky.ky_key`; "Nộp báo cáo định kỳ" → tên báo cáo + thời gian nộp (công thức đánh giá Trạng thái của nhóm này tham chiếu tiếp sang sheet "Nhóm chỉ tiêu - chỉ tiêu" dòng 30: so `NgayNop` với hạn nộp bc — quý: trước 10 tháng đầu quý sau; năm: trước 31/3 năm sau).
+  - Đối chiếu bằng script (parse seed SQL) thì **data mẫu KHÔNG khớp 2 công thức này**: 12/84 bản ghi "Nộp báo cáo định kỳ" và 25/91 bản ghi "Tiến độ" có `trang_thai`/`thuc_te_ghi_nhan` lưu sẵn trong `bc_tuan_thu_chi_tiet` sai lệch so với công thức tính từ field thật (`ngay_nop_bao_cao`/`tien_do_trang_thai` ở `bc_dinh_ky`) — seed gán 2 giá trị boilerplate độc lập, không theo công thức.
+  - Đã sửa `TabTuanThuServiceImpl`: thêm bước `tinhLaiTrangThaiVaThucTe` — với nhóm "Tiến độ"/"Nộp báo cáo định kỳ", TÍNH LẠI cả `trangThai` và `thucTeGhiNhan` từ `bc_dinh_ky` (join theo `project_id`+`ky_key` qua `BcDinhKyRepository.findByProjectIdAndKyKeyIn`, mới thêm), KHÔNG dùng giá trị lưu sẵn nữa. Công thức hạn nộp + 2 hàm suy luận trạng thái tách thành pure function ở `TuanThuCalculator` (`hanNopBaoCao`, `trangThaiNopBaoCaoDinhKy`, `trangThaiTienDo`) — có unit test ở `TuanThuCalculatorTest`. "Thực tế ghi nhận" nhóm "Nộp báo cáo định kỳ" tái dùng `KpiCalculator.tenMauBaoCao` (suy luận mẫu từ `loaiDuAn`×loại kỳ, cùng nguồn dùng cho "nguồn trích dẫn" ở tab Tổng quan — kèm hạn chế đã biết: chưa có field `ten_bao_cao` chính thức, xem mục 3.2 điểm 1) + `maBaoCao` + `ngayNopBaoCao`.
+  - 2 nhóm "mặc định tuân thủ" giữ nguyên hành vi cũ (không có công thức nào để tính lại) — nhưng bổ sung field `NhomTuanThuItem.thucTeGhiNhan` (cấp NHÓM, không phải cấp con — vì 2 nhóm này không có `chiTiet`) để mang giá trị mặc định `"Đạt yêu cầu theo quy định"` theo đúng dòng 49, thay vì bỏ trống hoàn toàn như trước.
+  - **Mock `tuan-thu.png` đã được cập nhật lại (2026-08-12), giải quyết mâu thuẫn từng ghi nhận trước đó**: bản mock mới KHÔNG còn nhóm "Tài chính" (khớp đúng quyết định loại hoàn toàn nhóm này ở trên) và show rõ nội dung "Thực tế ghi nhận" đúng theo công thức mới (nhóm Tiến độ: 4 dòng con là các giá trị `tien_do_trang_thai` khác nhau kèm kỳ NĂM riêng; nhóm Nộp báo cáo định kỳ: tên báo cáo + thời gian nộp) — khớp với hướng code đã sửa ở trên.
+- **(cập nhật thêm 2026-08-12, cùng ngày) Sheet 1 bổ sung 3 dòng "Biến động so với kỳ trước" (dòng 39/41/43) cho phần "Thẻ tổng hợp chỉ số"** — mỗi dòng gắn ngay sau 1 trong 3 chỉ số (Tổng số nghĩa vụ/Tổng số tuân thủ/Tổng số vi phạm), công thức: `Tăng/Giảm '(X kỳ này − X kỳ trước) / X kỳ trước'`. Khớp đúng badge "+2%/+10%/-2% so với kỳ trước" đã thấy ở ảnh mock từ trước (trước đó chưa có công thức tương ứng nên chưa code).
+  - Đã thêm 3 field `bienDongTongSoNghiaVu`/`bienDongTongSoTuanThu`/`bienDongTongSoViPham` (BigDecimal %, dấu âm = giảm) vào `TabTuanThuResponse`, công thức pure function `TuanThuCalculator.bienDongPhanTram(long kyNay, long kyTruoc)` (có unit test).
+  - **"Kỳ trước" hiểu là**: vì số liệu tab này vốn LŨY KẾ (không phải phát sinh riêng theo từng kỳ), "kỳ trước" = lũy kế tính TỚI kỳ báo cáo LIỀN TRƯỚC kỳ báo cáo hiện tại (cùng loại kỳ, qua `KyBaoCaoResolver` — nhất quán với rule "không trộn quý/năm" áp dụng xuyên suốt plan). `TabTuanThuServiceImpl.getTabTuanThu` giờ gọi `kyBaoCaoResolver.layNBaoCaoGanNhatCungLoaiKy(projectId, 2)` để lấy cả kỳ hiện tại lẫn kỳ trước, và gọi lại đúng logic lũy kế (`tinhLuyKe`, refactor từ code cũ) 2 lần với 2 mốc cutoff khác nhau. Đây là 1 diễn giải hợp lý nhưng KHÔNG được sheet nêu tường minh — nếu BA có ý khác (VD "kỳ trước" là kỳ liền trước theo lịch bất kể loại kỳ), cần chốt lại.
+  - `null` nếu dự án chưa có kỳ báo cáo trước đó, hoặc tổng số kỳ trước = 0 (không có mẫu số để tính %).
+  - **Phát hiện + sửa 1 bug nền tảng trong lúc build tính năng này** — xem mục 3.2ter (mới): `BcTuanThuChiTietRepository.findByProjectIdUpToKy` so sánh sai `thu_tu` xuyên suốt QUY/NAM, khiến nhóm "Tiến độ" gần như luôn rỗng với đa số dự án (bug có từ Phase 3 2026-08-11, không liên quan trực tiếp thay đổi hôm nay, chỉ tình cờ lộ ra khi cần gọi lại method này với 1 cutoff khác).
+
+#### Tab Rủi ro — **đã code xong** (2026-08-11, cập nhật 2026-08-12)
+
+- `TabRuiRoService`/`Impl` (`GET .../chi-tiet/rui-ro`). Gauge tổng quát (0–10, trung bình 4 danh mục — `KpiCalculator.diemRuiRoTongQuat`) + 4 danh mục con (Tài chính/Tiến độ/Vốn & Giải ngân/Tuân thủ, fix cứng theo enum `DanhMucRuiRo`) + bảng chi tiết + `hasCriticalOrHighRisk` cho tab Gợi ý.
+- **(cập nhật 2026-08-12) Sheet "Phân tích chuyên sâu" dòng 84 đã bổ sung đầy đủ công thức điểm rủi ro cho cả 4 danh mục** (trước đó chỉ có công thức Tài chính, 3 danh mục còn lại chưa có formula) — đã sửa code để **tính lại** cả 4 điểm, không còn thiết kế cũ "chờ 1 job async ghi sẵn vào `bc_rui_ro_chi_tiet.gia_tri_diem`/`muc_do`" (thiết kế cũ đó chưa có job nào thật tồn tại — cùng tình trạng với tab Tuân thủ trước khi sửa hôm 2026-08-12, xem mục ngay trên). `bc_rui_ro_chi_tiet` giờ chỉ còn dùng để tra `insight_id` (AI insight "diễn giải nguyên nhân" — vẫn cần LLM thật, không phải công thức xác định).
+- 4 công thức (pure function ở `RuiRoCalculator`, unit test ở `RuiRoCalculatorTest`):
+  - **Tài chính**: số chỉ tiêu có Xu hướng "Giảm" × 10/x, x = số chỉ tiêu tài chính có dữ liệu (đúng rule hiển thị của tab Tài chính — tái dùng `ChiTieuTaiChinh`/`TaiChinhCalculator`, không viết lại logic biến động/xu hướng). x tự nhiên khác 4/7/8 theo từng mẫu báo cáo, không hard-code — khớp mục 3.4 điểm 3/9 (số chính xác 7 vs 8 cho mẫu 116, 4 vs 5 cho mẫu 89 vẫn là mâu thuẫn nội bộ trong sheet, chưa chốt với BA, nhưng không ảnh hưởng cách tính "x động theo dữ liệu thật" đã chọn).
+  - **Tiến độ**: map trực tiếp `bc_dinh_ky.tien_do_trang_thai` của báo cáo gần nhất → đúng tiến độ=2.5/chậm tiến độ=5/gặp khó khăn=7.5/không có khả năng triển khai=10.
+  - **Tuân thủ**: tái dùng `mucDoRuiRoHeThong` đã tính sẵn ở tab Tuân thủ (gọi `TabTuanThuService.getTabTuanThu` từ `TabRuiRoServiceImpl` — service gọi service qua interface, không tính lại tỷ lệ vi phạm ở đây) → thấp=2.5/trung bình=5/cao=7.5/nghiêm trọng=10.
+  - **Vốn & Giải ngân**: `10 × tỷ_lệ_chưa_giải_ngân × [0,60 + 0,25×(1−e^(−ln2/3×số_kỳ_hoạt_động)) + 0,15×percentileRank(ln(1+tổng_vốn_đầu_tư_đăng_ký))]`. Đây là công thức phức tạp nhất, có **2 giả định chưa được BA xác nhận** (ghi trong Javadoc `RuiRoCalculator#diemRuiRoVonGiaiNgan`, cần chốt trước khi tin tưởng số liệu này cho quyết định thật):
+    1. "Số kỳ hoạt động" hiểu là tổng số báo cáo định kỳ dự án đã nộp tới hiện tại (`BcDinhKyRepository.countByProjectId`, mọi loại kỳ) — sheet không định nghĩa rõ đây là số kỳ theo lịch (từ ngày cấp GCNDT) hay số kỳ đã CÓ báo cáo.
+    2. `percentileRank` tính theo quy ước "tỷ lệ phần tử trong tập ≤ giá trị đang xét" (0–1), KHÔNG phải công thức `PERCENTRANK.INC` chuẩn của Excel (`(hạng−1)/(n−1)`) — sheet không nêu định nghĩa cụ thể.
+    - Tập tham chiếu percentile lấy TOÀN BỘ danh mục dự án qua query mới `BcDinhKyRepository.layTongVonDauTuDangKyMoiNhatToanDanhMuc` (native SQL `DISTINCT ON`, 1 giá trị mới nhất/dự án) — **tính LIVE mỗi lần gọi API**, chấp nhận được ở quy mô ~100 dự án mẫu hiện tại nhưng cần đánh giá lại (cache/batch, giống hướng "trung bình ngành" ở mục 4 #3) nếu số dự án tăng lớn.
+    - **Phát hiện khi kiểm chứng bằng data thật (query trực tiếp DB `cmcdtqg_db`)**: cả 100 dự án mẫu hiện có CÙNG giá trị `tong_von_dau_tu_dang_ky` mới nhất = 500.000.000 — nghĩa là với seed hiện tại, `percentileRank` (yếu tố quy mô vốn) luôn ra đúng `1.0000` cho mọi dự án (không có biến thiên thật để test yếu tố này) — 2 yếu tố còn lại (tỷ lệ chưa giải ngân, số kỳ hoạt động) vẫn biến động bình thường theo dự án. Không phải lỗi công thức, chỉ là hạn chế của data mẫu.
+  - `mucDo` mỗi danh mục (Nghiêm trọng/Cao/Trung bình/Thấp) tái dùng chung 1 ngưỡng với "Mức độ rủi ro tổng quát" (`KpiCalculator.phanLoaiRuiRo`, [0-2.5)/[2.5-5)/[5-7.5)/[7.5-10] — sheet 1 dòng 82) — giả định ngưỡng này áp dụng luôn cho từng danh mục con, sheet chưa nêu riêng ngưỡng khác cho dòng 84.
 
 ### Phase 4 — So sánh, Dự báo, Gợi ý (6.2.g–k)
 
