@@ -368,6 +368,87 @@ Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng 
 - Dự báo: cần chốt thuật toán (mục 4, #4) — có thể làm placeholder rule-based trước.
 - Gợi ý: dùng lại flag `hasCriticalOrHighRisk` từ Phase 3.
 
+#### Tab con "So sánh" (2 sub-tab: đa chỉ tiêu theo kỳ + trung bình ngành) — **đã code xong** (2026-08-12)
+
+- 2 endpoint mới trên `ChiTietDuAnController`: `GET .../chi-tiet/so-sanh/da-chi-tieu-theo-ky` (docx
+  mục 2.2.g, sheet 1 dòng 71–79) và `GET .../chi-tiet/so-sanh/trung-binh-nganh` (docx mục 2.2.h,
+  sheet 1 dòng 107–114), mỗi endpoint 1 service riêng (`SoSanhDaChiTieuService`/`SoSanhNganhService`).
+- Enum mới `NhomChiTieuSoSanh` (Tài chính/Vốn & Giải ngân/Tuân thủ/Rủi ro — **không có Tiến độ**,
+  khác `DanhMucRuiRo` của tab Rủi ro) + calculator mới `SoSanhCalculator` (quy đổi tiến độ sang
+  thang "hiệu suất" 0–10, chuẩn hoá 1 trục radar theo quy tắc "mẫu số = lớn hơn giữa dự án/ngành",
+  trung bình cộng bỏ qua `null`, đổi thang 0–10 ↔ 0–100) — pure function, unit test ở
+  `SoSanhCalculatorTest`.
+
+**So sánh đa chỉ tiêu theo kỳ**:
+- Query param: `nhomChiTieu` (mặc định TAI_CHINH), `chiTieu` (mã enum con, bỏ qua nếu nhóm là
+  TUAN_THU/RUI_RO), `soKy` (mặc định 4), `kyKeys` (danh sách kỳ cụ thể — "Tuỳ chọn khác", ưu tiên hơn
+  `soKy` khi có). Chỉ 2 nhóm Tài chính/Vốn & Giải ngân có "ô chọn chỉ tiêu" — 2 nhóm còn lại (Tuân
+  thủ/Rủi ro) không có lựa chọn, chart cột dùng cố định tỷ lệ vi phạm(%)/điểm rủi ro tổng quát quy
+  đổi %; khi 1 nhóm KHÔNG active, cột của nó vẫn hiển thị nhưng dùng chỉ tiêu MẶC ĐỊNH (Tài chính →
+  Doanh thu, Vốn & Giải ngân → Vốn góp) vì spec chỉ có 1 "ô chọn chỉ tiêu" chung, không có ô riêng
+  cho từng nhóm không active (docx mục 2.2.g).
+- Bảng dữ liệu so sánh chi tiết (`bangChiTiet`) có cấu trúc CỐ ĐỊNH — luôn đúng 6 dòng/3 nhóm (Doanh
+  thu, Lợi nhuận | Tỷ lệ giải ngân, Trạng thái tiến độ | Số lỗi vi phạm, Mức độ rủi ro) — KHÔNG phụ
+  thuộc `nhomChiTieu` đang chọn, khác biểu đồ.
+- **Điểm rủi ro tổng quát tại 1 kỳ LỊCH SỬ bất kỳ** (không chỉ báo cáo gần nhất) — `TabRuiRoServiceImpl`
+  (Phase 3) chỉ tính cho kỳ hiện tại nên phải orchestrate lại riêng trong
+  `SoSanhDaChiTieuServiceImpl` (tái dùng nguyên các hàm thuần của `RuiRoCalculator`, không sửa
+  `TabRuiRoServiceImpl` để tránh rủi ro ảnh hưởng ngược tab Rủi ro đang chạy). Đơn giản hoá có chủ
+  đích: phần "quy mô vốn chuẩn hoá" (percentileRank) luôn so với snapshot MỚI NHẤT của toàn danh mục
+  (không tính lại "toàn danh mục tại đúng thời điểm X trong quá khứ" — cần query lịch sử phức tạp
+  hơn, ngoài phạm vi Phase 4). Cần repository method mới `BcDinhKyRepository.findKyNgayTruoc` (kỳ
+  ngay trước 1 mốc X, cùng loại kỳ, so `ngay_ket_thuc` — đúng nguyên tắc đã áp dụng xuyên suốt plan,
+  xem mục 3.2ter) và `TabTuanThuService.tinhThongKeTaiKy` mới (thu gọn từ helper nội bộ đã có sẵn
+  của `TabTuanThuServiceImpl`, KHÔNG đổi hành vi `getTabTuanThu` hiện tại) để lấy tỷ lệ vi
+  phạm/mức độ rủi ro hệ thống tại 1 kỳ lịch sử bất kỳ.
+- AI insight: `ai_insight.tab_nguon = "so_sanh_ky"` (đã có sẵn trong danh sách tab_nguon liệt kê ở
+  Javadoc `AiInsight`, chưa từng dùng tới trước Phase 4 này), fallback rule-based so sánh kỳ đầu/kỳ
+  cuối trong danh sách đang so sánh.
+
+**So sánh với trung bình ngành**:
+- Không có query param — luôn so sánh tại kỳ báo cáo GẦN NHẤT của dự án (đúng docx, không có bộ chọn
+  kỳ ở sub-tab này, khác sub-tab "đa chỉ tiêu theo kỳ").
+- **Trục radar (thang 10) và bảng chi tiết (%) dùng 2 cách quy đổi KHÁC NHAU cho cùng khái niệm
+  "Tài chính"/"Vốn & Giải ngân" — có chủ đích, không phải không nhất quán**: trục radar dùng GIÁ TRỊ
+  THÔ (doanh thu kỳ báo cáo, vốn thực hiện lũy kế) chuẩn hoá theo `SoSanhCalculator.trucChuanHoa`
+  (đúng nguyên văn sheet 1 dòng 107 "mức 10 ứng với ... của dự án hoặc tb ngành lấy cái lớn hơn");
+  bảng chi tiết dùng "Doanh thu" = % TĂNG TRƯỞNG (kỳ này so kỳ trước, tái dùng
+  `TaiChinhCalculator.bienDongPhanTram`) và "Giải ngân" = TỶ LỆ giải ngân (%,
+  `KpiCalculator.tyLeGiaiNgan`) — khớp đúng ảnh mock (giá trị hiển thị dạng "18.5%"/"80%", vô lý nếu
+  là số tiền thô).
+- **Nguồn "trung bình ngành"**: đọc `bc_chi_tieu_trung_binh` theo `(kyKey, maNganh, chiTieu)` qua
+  repository method mới `findByKyKeyAndMaNganhAndChiTieu`. Data mẫu hiện tại MỚI CHỈ có 2 mã chỉ tiêu
+  thật (`doanh_thu_thuan_ky`, `von_dau_tu_thuc_hien_luy_ke_gcndt`) — 4 mã còn lại mà code kỳ vọng
+  (`ty_le_giai_ngan`, `ty_le_tuan_thu`, `diem_rui_ro_tong_quat`, `diem_tien_do_thang_10`) **chưa tồn
+  tại trong data mẫu**, trả `null` cho tới khi 1 job batch riêng (ngoài phạm vi Phase 4, xem mục 4
+  #3) tính và ghi các mã này — đây là hành vi ĐÚNG dự kiến theo đúng quyết định đã chốt ở đầu Phase 4
+  ("cần job tính toán riêng"), không phải lỗi/thiếu sót của Phase 4. Field `radar[].diemNganh`/
+  `bangChiTiet[].giaTriNganh` vì vậy phần lớn sẽ `null` khi test với data mẫu hiện tại.
+- "Tiến độ dự án" ở bảng chi tiết — trung bình ngành LUÔN `null` (không có quy ước hợp lý để quy đổi
+  1 nhãn định tính từ điểm số trung bình; khác 4 chỉ tiêu còn lại vốn có sẵn dạng %/điểm).
+- **Điểm tổng hợp = trung bình cộng NGUYÊN VĂN 5 điểm trục radar của dự án (sheet 1 dòng 109)** — kể
+  cả khi điều này trộn lẫn cực tính (4/5 trục "cao = tốt", trục Rủi ro "cao = xấu"). Đã cân nhắc
+  "sửa" cho hợp lý hơn (VD đảo dấu trục Rủi ro) nhưng quyết định giữ NGUYÊN VĂN công thức sheet, chỉ
+  ghi chú lại sự bất thường này trong Javadoc — theo đúng nguyên tắc xuyên suốt plan là không tự
+  suy diễn/sửa công thức khi chưa chốt lại với BA.
+- AI insight: `ai_insight.tab_nguon = "so_sanh_nganh"`, fallback rule-based chỉ nêu điểm tổng hợp
+  (chưa đủ ngữ cảnh để sinh văn phong "vị thế cạnh tranh" như mock — sheet 1 dòng 113 cần LLM thật).
+
+**Open questions mới phát sinh** (bổ sung mục 4):
+- Chưa xác nhận với BA: tỷ lệ vi phạm(%) có đúng là chỉ số hiển thị cho cột "Tuân thủ" ở biểu đồ so
+  sánh đa chỉ tiêu theo kỳ hay không (docx chỉ nói "quy đổi giá trị của nhóm chỉ tiêu Tuân thủ... về
+  thang 0–100%", không nêu rõ là tỷ lệ vi phạm hay tỷ lệ tuân thủ) — chọn tỷ lệ vi phạm vì bảng chi
+  tiết cùng nhóm hiển thị "Số lỗi vi phạm" (hướng vi phạm), nhưng đây là 1 diễn giải hợp lý, chưa
+  phải xác nhận trực tiếp.
+- Quy đổi "hiệu suất" tiến độ sang thang 10 (`SoSanhCalculator.diemTienDoThang10`: đúng=10,
+  chậm=6.67, khó khăn=3.33, không thể=0) là suy luận nghịch đảo tuyến tính từ thang RỦI RO
+  (2.5/5/7.5/10) — sheet chỉ nói "tiến độ quy 4 mức về thang 10", không nêu công thức quy đổi
+  "hiệu suất" cụ thể. Cần chốt lại với BA.
+- 4 mã chỉ tiêu trung bình ngành mới (`ty_le_giai_ngan`, `ty_le_tuan_thu`, `diem_rui_ro_tong_quat`,
+  `diem_tien_do_thang_10`) là ĐẶT TÊN của Phase 4 này — chưa được BA/job batch xác nhận, có thể job
+  thật dùng tên mã khác. Cần đối chiếu lại khi job batch tính "trung bình ngành" (mục 4 #3) được
+  triển khai.
+
 ### Phase 5 — LLM insight client dùng chung
 
 - Xác nhận `AiServiceClient` có hỗ trợ prompt tự do; nếu không, thêm client mới theo pattern hiện có.
