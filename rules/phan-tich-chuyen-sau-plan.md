@@ -362,11 +362,11 @@ Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng 
     - **Phát hiện khi kiểm chứng bằng data thật (query trực tiếp DB `cmcdtqg_db`)**: cả 100 dự án mẫu hiện có CÙNG giá trị `tong_von_dau_tu_dang_ky` mới nhất = 500.000.000 — nghĩa là với seed hiện tại, `percentileRank` (yếu tố quy mô vốn) luôn ra đúng `1.0000` cho mọi dự án (không có biến thiên thật để test yếu tố này) — 2 yếu tố còn lại (tỷ lệ chưa giải ngân, số kỳ hoạt động) vẫn biến động bình thường theo dự án. Không phải lỗi công thức, chỉ là hạn chế của data mẫu.
   - `mucDo` mỗi danh mục (Nghiêm trọng/Cao/Trung bình/Thấp) tái dùng chung 1 ngưỡng với "Mức độ rủi ro tổng quát" (`KpiCalculator.phanLoaiRuiRo`, [0-2.5)/[2.5-5)/[5-7.5)/[7.5-10] — sheet 1 dòng 82) — giả định ngưỡng này áp dụng luôn cho từng danh mục con, sheet chưa nêu riêng ngưỡng khác cho dòng 84.
 
-### Phase 4 — So sánh, Dự báo, Gợi ý (6.2.g–k)
+### Phase 4 — So sánh, Dự báo, Gợi ý (6.2.g–k) — **đã code xong cả 4 tab con** (2026-08-12/13)
 
-- So sánh trung bình ngành: dùng `bc_chi_tieu_trung_binh` (batch), cần job tính toán riêng (ngoài phạm vi phase này, xem Phase 0).
-- Dự báo: cần chốt thuật toán (mục 4, #4) — có thể làm placeholder rule-based trước.
-- Gợi ý: dùng lại flag `hasCriticalOrHighRisk` từ Phase 3.
+- So sánh trung bình ngành: dùng `bc_chi_tieu_trung_binh` (batch), cần job tính toán riêng (ngoài phạm vi phase này, xem Phase 0). **Đã code** — chi tiết ở mục "Tab con 'So sánh'" dưới đây.
+- Dự báo: cần chốt thuật toán (mục 4, #4) — **đã code** với placeholder rule-based (naive/persistence forecast) khi `bc_du_bao` chưa có dữ liệu, đúng gợi ý ban đầu. Chi tiết ở mục "Tab 'Dự báo'" dưới đây.
+- Gợi ý: dùng lại flag `hasCriticalOrHighRisk` từ Phase 3. **Đã code** — chi tiết ở mục "Tab 'Gợi ý'" dưới đây.
 
 #### Tab con "So sánh" (2 sub-tab: đa chỉ tiêu theo kỳ + trung bình ngành) — **đã code xong** (2026-08-12)
 
@@ -448,6 +448,98 @@ Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng 
   `diem_tien_do_thang_10`) là ĐẶT TÊN của Phase 4 này — chưa được BA/job batch xác nhận, có thể job
   thật dùng tên mã khác. Cần đối chiếu lại khi job batch tính "trung bình ngành" (mục 4 #3) được
   triển khai.
+
+#### Tab "Dự báo" — **đã code xong** (2026-08-13)
+
+- `GET .../chi-tiet/du-bao` (docx mục 2.2.i, sheet 1 dòng 98–106). Biểu đồ (nhóm nút "Hiển thị xu
+  hướng" + 4 cột + line overlay) TÁI DÙNG nguyên cơ chế của tab "So sánh đa chỉ tiêu theo kỳ" — khác
+  biệt duy nhất: "ô chọn chỉ tiêu" LUÔN disable (docx), nên endpoint này KHÔNG có tham số `chiTieu`;
+  mỗi cột luôn dùng đúng 1 chỉ tiêu mặc định cố định (Tài chính→Doanh thu, Vốn & Giải ngân→Vốn góp ở
+  phần lịch sử). `nhomChiTieu` vẫn nhận (mặc định TAI_CHINH) nhưng chỉ ảnh hưởng cột nào được
+  highlight ở FE, KHÔNG đổi giá trị cột nào.
+- **Tách `DiemRuiRoTaiKyResolver` (interface + impl mới) khỏi `SoSanhDaChiTieuServiceImpl`** — trước
+  đó (Phase 4, sub-tab So sánh) orchestration "điểm rủi ro tổng quát tại 1 kỳ lịch sử bất kỳ" là
+  private method riêng của `SoSanhDaChiTieuServiceImpl`; tab Dự báo cũng cần chính xác logic này (vẽ
+  biểu đồ lịch sử ≥8 kỳ) nên refactor thành service dùng chung (2 lần cần là ngưỡng chấp nhận được để
+  tách, tránh copy-paste lần thứ 3) — đã refactor `SoSanhDaChiTieuServiceImpl` gọi qua interface mới,
+  hành vi giữ nguyên (test cũ vẫn pass).
+- **Nguồn dự báo thật rất hạn chế — chỉ 3/5 nhóm có dữ liệu trong `bc_du_bao`**: đối chiếu seed data
+  thật, `bc_du_bao.nhom_chi_tieu` (thực chất là MÃ CHỈ TIÊU đơn lẻ, xem Javadoc entity) chỉ có 3 giá
+  trị (`doanh_thu_thuan`, `loi_nhuan_sau_thue`, `von_thuc_hien`), của 90/100 dự án mẫu, luôn cho ĐÚNG
+  1 kỳ tương lai (`2026-Q3`). KHÔNG có bản ghi nào cho Tuân thủ/Rủi ro/trạng thái Tiến độ. Xử lý: ưu
+  tiên đọc `bc_du_bao` khi có (bản ghi này do 1 job time-series thật ngoài phạm vi module ghi — xem
+  plan mục 2.2 điểm 2), **fallback "dự báo ngây thơ" (naive/persistence forecast — giữ nguyên giá
+  trị/trạng thái kỳ hiện tại, % tăng trưởng = 0)** khi thiếu — đúng gợi ý ở đầu Phase 4 ("có thể làm
+  placeholder rule-based trước" khi chưa chốt thuật toán, mục 4 #4). Mỗi card dự báo (`TheDuBaoItem`)
+  có cờ `tuMoHinhThat` để FE/BA biết dòng nào là số thật từ model, dòng nào là placeholder.
+- **"Vốn & Giải ngân" ở điểm dự báo (nét đứt) dùng "vốn thực hiện", KHÁC "Vốn góp" ở phần lịch sử
+  của cùng biểu đồ** — vì `bc_du_bao` chỉ có mô hình cho "vốn thực hiện" (driver của tỷ lệ giải
+  ngân), không có "vốn góp". Cả 2 đều là số tiền tỷ VNĐ (cùng đơn vị trục Y trái) nên chấp nhận dùng
+  trực tiếp, chỉ ghi rõ khác biệt ý nghĩa trong Javadoc `TabDuBaoResponse.DiemDuBaoItem` — không tự
+  suy diễn 1 công thức "vốn góp dự báo" nào khác khi spec không có.
+- **5 card dự báo bám sát ĐÚNG mô tả DÒNG CHÍNH/DÒNG PHỤ chi tiết ở docx mục 2.2.i (ưu tiên hơn mô tả
+  tổng quát 1 dòng ở sheet 1)** — VD sheet 1 dòng 102 tóm tắt card Vốn & Giải ngân là "Kỳ vọng giải
+  ngân (%) & Target", nhưng docx chi tiết lại nói rõ dòng chính là "Số tiền giải ngân dự báo" (tỷ
+  VNĐ, không phải %) + dòng phụ % tăng/giảm — đã bỏ luôn khái niệm "Target" (không có nguồn dữ liệu
+  nào, không phải phần cấu hình ngưỡng nào tồn tại trong schema hiện có — cùng loại gap với "Vốn
+  khác" mục 3.4.1).
+- `kyTiepTheoLabel`: cần repository method mới `DmKyBaoCaoRepository.findKyTiepTheo` (kỳ NGAY SAU kỳ
+  hiện tại, cùng loại kỳ, so `ngay_bat_dau`/`ngay_ket_thuc` — không dùng `thu_tu`, đúng nguyên tắc đã
+  áp dụng xuyên suốt plan mục 3.2ter). `null` nếu kỳ đó chưa được tạo trong `dm_ky_bao_cao` (không
+  chặn hiển thị 5 card — vẫn tính bằng naive fallback dựa trên kỳ hiện tại).
+- AI insight: `ai_insight.tab_nguon = "du_bao"` (đã có sẵn trong danh sách liệt kê ở Javadoc
+  `AiInsight`), fallback rule-based ghép dòng chính của cả 5 card.
+- **3 điểm sửa sau khi đối chiếu ảnh mock `images/du-bao/du-bao-1.png`/`du-bao-2.png` (2026-08-13)**:
+  1. Bổ sung field `chiTieuTen` (mới) trên response — mock cho thấy "ô chọn chỉ tiêu" (luôn disable)
+     vẫn hiển thị giá trị (VD "Doanh thu", "Vốn góp") tuỳ nhóm đang bật, để trống khi Tuân thủ/Rủi ro
+     — trước đó API không trả field nào cho FE biết hiển thị gì ở đó (FE sẽ phải tự hardcode mapping
+     nhóm→tên, nay không cần nữa).
+  2. Bổ sung `tienDoTrangThai` trên `DiemDuBaoItem` (điểm dự báo/nét đứt) — mock cho thấy Icon trạng
+     thái tiến độ xuất hiện dưới MỌI mốc kỳ trên trục X, kể cả mốc dự báo cuối cùng, không chỉ các mốc
+     lịch sử (trước đó field này bị bỏ trống ở điểm dự báo, chỉ có ở `DiemLichSuItem`).
+  3. **Sửa lỗi thật**: fallback naive của `diemDuBao.vonGiaiNgan` (khi `bc_du_bao` chưa có dữ liệu)
+     trước đó lấy nhầm `ky1.getVonGopKy()` (Vốn góp — chỉ tiêu dùng ở phần LỊCH SỬ) thay vì
+     `ky1.getVonDauTuThucHienLuyKeGcndt()` (vốn thực hiện — đúng chỉ tiêu mà điểm dự báo đại diện,
+     khớp với nhánh có model thật). Bug này khiến giá trị điểm dự báo nhảy đột ngột sang 1 chỉ tiêu
+     khác hẳn khi không có `bc_du_bao` — đã sửa để fallback ĐÚNG chỉ tiêu, chỉ khác ở CÓ hay KHÔNG
+     dữ liệu model, không đổi luôn cả ý nghĩa số liệu.
+  4. Đổi wording dòng phụ 2 card Tài chính/Vốn & Giải ngân từ "so với kỳ hiện tại" → "so với kỳ
+     trước" — khớp nguyên văn docx mục 2.2.i ("Mức độ tang giảm X% so với kỳ trước"), dù công thức
+     thực chất so với "Kỳ hiện tại" (2 cách gọi cùng 1 khái niệm, xét từ góc nhìn kỳ ĐƯỢC dự báo).
+
+#### Tab "Gợi ý" — **đã code xong** (2026-08-13, sửa lại sau khi đối chiếu ảnh mock cùng ngày)
+
+- `GET .../chi-tiet/goi-y` (docx mục 2.2.k). Toàn bộ dữ liệu suy ra TRỰC TIẾP từ
+  `TabRuiRoService#getTabRuiRo` (Phase 3) — KHÔNG có nguồn dữ liệu độc lập nào khác: mỗi danh mục
+  rủi ro (Tài chính/Tiến độ/Vốn & Giải ngân/Tuân thủ) ở mức Cao/Nghiêm trọng → 1 card gợi ý. Zip theo
+  INDEX giữa `TabRuiRoResponse.danhMucRuiRo` và `DanhMucRuiRo.values()` (đúng thứ tự
+  `TabRuiRoServiceImpl` đã dùng để build danh sách đó) để lấy field mới `DanhMucRuiRo.maRoute` (slug
+  route khớp path controller, VD `"von-giai-ngan"` — cố ý tách khỏi `DanhMucRuiRo.ma` vì mã DB có
+  `"va"` còn path controller không có).
+- **Sửa lỗi hiểu nhầm sau khi đối chiếu ảnh mock `images/goi-y/goi-y-1.png` (2026-08-13)**: "5 nhóm
+  nguồn phát hiện" ở docx (Tài chính/Vốn & Giải ngân/Tuân thủ/Tiến độ/Rủi ro) BAN ĐẦU hiểu nhầm là chỉ
+  cách gọi tên chung "5 nhóm chỉ tiêu", không phải 1 nguồn thật — SAI, mock cho thấy rõ CÓ 1 card thứ
+  5 độc lập, label "Rủi ro". Đã sửa: thêm `TabGoiYServiceImpl#xayDungGoiYTongQuat` — card thứ 5 này
+  lấy từ ĐIỂM RỦI RO TỔNG QUÁT (`mucDoTongQuat`/`nhanDinh` ở đầu tab Rủi ro, gauge 0-10), KHÁC 4 card
+  kia (lấy từ điểm rủi ro từng DANH MỤC con). `maRoute="rui-ro"` (khớp path `GET .../chi-tiet/rui-ro`
+  của tab Rủi ro tổng thể, không phải path 1 trong 4 danh mục con). Do đó `soLuongCanhBaoCao` (=
+  `danhSachGoiY.size()`, tính SAU khi đã thêm card này) giờ có thể lên tới 5, khớp đúng ảnh mock
+  (AI insight text ghi "05 nội dung", dù badge số riêng trong ảnh lại ghi "03" — chỉ đếm card mức
+  "Cao", KHÔNG tính "Nghiêm trọng" — mâu thuẫn với công thức chính docx dòng 92 "Cao HOẶC Nghiêm
+  trọng"; giữ theo công thức docx, không theo con số lệch của mock, cùng nguyên tắc "ảnh mock chỉ
+  đáng tin về cấu trúc UI" đã áp dụng xuyên suốt plan. FE có thể tự đếm riêng số lượng "Cao" từ
+  `danhSachGoiY[].mucDo` nếu cần khớp đúng badge đó, không cần thêm field mới).
+- "Nội dung nhận định" (thẻ tổng hợp đầu tab) — spec ghi rõ "Rule-based" (không phải AI, khác hầu hết
+  vùng nhận định khác trong toàn bộ plan) — implement CỐ ĐỊNH theo đúng công thức docx, không tra
+  `ai_insight`.
+- "Tiêu đề gợi ý" — CHƯA có client LLM (Phase 5 còn mở), dùng rule-based cố định thay thế, KHÔNG tra
+  `ai_insight` (không có insight riêng cho tiêu đề ngắn, tách biệt khỏi "mô tả chi tiết" — 1 danh mục
+  chỉ có 1 `insight_id` duy nhất). "Mô tả chi tiết" tái dùng `dienGiaiNguyenNhan` đã có sẵn ở tab Rủi
+  ro (qua `bc_rui_ro_chi_tiet.insight_id`) — đây CHÍNH LÀ AI insight thật khi job async đã sinh,
+  không phải rule-based riêng cho tab này.
+- `hasCriticalOrHighRisk`/`soLuongCanhBaoCao` đồng bộ trực tiếp với tab Rủi ro — FE có thể dùng field
+  này ngay trong response của tab Gợi ý để tự quyết định enable/disable tab, không buộc phải gọi
+  riêng tab Rủi ro trước.
 
 ### Phase 5 — LLM insight client dùng chung
 
