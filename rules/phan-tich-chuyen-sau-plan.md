@@ -1,7 +1,7 @@
 # Phân tích chuyên sâu dự án — Phân tích nghiệp vụ & Kế hoạch triển khai
 
 > Nguồn:
-> - `.claude/tasks/phantichchuyensau/phantichchuyensau.docx` (mục 6.1–6.3 của tài liệu đặc tả nghiệp vụ/giao diện)
+> - `.claude/tasks/phantichchuyensau/phantichchuyensau.docx` (mục 6.1–6.3 của tài liệu đặc tả nghiệp vụ/giao diện — **cập nhật 2026-08-18**: bổ sung đoạn "Vùng AI insights" mô tả Like/Dislike, xem mục 2.2.l và Phase 4bis)
 > - `.claude/tasks/phantichchuyensau/100 dòng bc.xlsx` (data mẫu thật của bảng báo cáo nguồn)
 > - `.claude/tasks/phantichchuyensau/Mô tả logic công thức.xlsx` (spec công thức chi tiết theo từng mẫu báo cáo, **4 sheet** — cập nhật 2026-08-05, thêm sheet "Biến số khả dụng"; xem mục 3.3)
 > - `.claude/tasks/phantichchuyensau/schema_fixed.sql` (**bản đề xuất DB** từ phía đối tác/khách hàng — không phải bản chốt, được phép điều chỉnh theo nghiệp vụ thực tế)
@@ -90,6 +90,32 @@ Thông tin chung của dự án + kỳ báo cáo hiện tại, ánh xạ tới *
 3. **Nhiều công thức tính rõ ràng, unit-test được** — tách thành pure calculator/service riêng theo từng nhóm chỉ tiêu.
 4. **Tab Gợi ý phụ thuộc dữ liệu tab Rủi ro** — cần backend trả flag `hasCriticalOrHighRisk`.
 5. Mọi bảng "kỳ trước/kỳ này/N kỳ gần nhất" phụ thuộc **loại báo cáo gần nhất là quý hay năm** — cần khái niệm "kỳ" trừu tượng xuyên suốt service layer. **1 dự án có song song 2 luồng báo cáo** (4 báo cáo quý/năm + 1 báo cáo năm) — "cùng kỳ" phải so quý-với-quý hoặc năm-với-năm theo đúng loại của báo cáo gần nhất, KHÔNG được lấy N bản ghi mới nhất theo ngày nộp rồi trộn lẫn 2 loại (**Phase 2/3 code lần đầu đã mắc lỗi này** — `findTop2/4/5ByProjectId...Desc` không lọc theo loại kỳ; đã sửa bằng `KyBaoCaoResolver` — xem Phase 2/3 status bên dưới).
+
+#### l. Like/Dislike cho vùng "AI insights" (bổ sung docx 2026-08-18)
+
+`phantichchuyensau.docx` được cập nhật thêm 1 đoạn "Vùng AI insights" lặp lại giống nhau ở **đúng 8
+vị trí** trong tài liệu — đối chiếu từng vị trí với header section thì khớp 1-1 với 8/10 vùng
+"Nội dung nhận định (AI insights)" đã liệt kê ở bảng mục 2.2.b–k phía trên: **Tài chính, Vốn &
+Giải ngân, Tiến độ, Rủi ro (chỉ gắn vào ĐÚNG 1 khối — nhận định tổng hợp cuối bảng chi tiết yếu tố
+rủi ro, KHÔNG gắn vào "Dòng khuyến nghị" của gauge cũng KHÔNG gắn vào "Diễn giải nguyên nhân (AI)"
+của từng danh mục con), So sánh đa chỉ tiêu theo kỳ, So sánh trung bình ngành, Dự báo, Gợi ý**.
+**Tổng quan và Tuân thủ KHÔNG có đoạn này** (đã kiểm tra trực tiếp trong docx, không suy đoán) —
+khớp đúng hiện trạng đã biết ("Tuân thủ không có insight AI ở tab này"; Tổng quan hiện chỉ có 4 đoạn
+text mô tả, không có UI vùng AI insights riêng).
+
+Quy tắc nghiệp vụ (nguyên văn docx, giống nhau ở cả 8 vị trí):
+- Mỗi người dùng chỉ được chọn **1 trong 2 trạng thái (Like hoặc Dislike) tại 1 thời điểm** cho
+  cùng 1 nhận định — không cho phép chọn đồng thời cả hai.
+- Mỗi lượt đánh giá lại của cùng 1 người dùng trên cùng 1 nhận định **ghi đè lên bản ghi cũ** (cập
+  nhật `updated_at`), **không tạo thêm bản ghi mới** — đảm bảo 1 người dùng luôn có tối đa 1 đánh
+  giá hiệu lực trên 1 nhận định.
+- Đánh giá của 1 người dùng **không hiển thị công khai** cho người dùng khác xem (chỉ hiển thị đúng
+  trạng thái đánh giá của chính người đang xem).
+- Hành vi nút bấm: bấm Like/Dislike lần đầu → bật; bấm lại đúng nút đang bật → tắt (về trạng thái
+  chưa đánh giá); đang bật Like mà bấm Dislike (hoặc ngược lại) → chuyển đổi (tắt cái cũ, bật cái
+  mới, gọi API cập nhật).
+
+→ Thiết kế DB + API cho phần này xem **Phase 4bis** (sau Phase 4, trước Phase 5).
 
 ### 2.3. Xuất báo cáo (6.3)
 
@@ -360,8 +386,8 @@ Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng 
   - Áp dụng cho cả kỳ hiện tại lẫn kỳ trước (tính "biến động so với kỳ trước" — mục ngay trên) — dùng đúng số báo cáo lũy kế tại từng mốc cutoff tương ứng.
 - **(xác nhận thêm 2026-08-11, cùng session) 3 rule khác theo nhóm, đã áp dụng ở `TabTuanThuServiceImpl.locNghiaVuHopLe` — lọc TRƯỚC khi tính bất cứ số liệu nào (khác với 2 nhóm ở trên, chỉ sửa ở bảng cây, chưa sửa tổng)**:
   - Nhóm "Tài chính" (`Nghia vu tai chinh`): chưa có công thức tuân thủ → **loại hoàn toàn** khỏi response, kể cả khỏi `tongSoNghiaVu`/tỷ lệ tổng thể (khác 2 nhóm "mặc định tuân thủ" ở trên — nhóm này không hiện cả trong bảng cây, không có node cha nào tên "Tài chính").
-  - Nhóm "Tiến độ" (`Nghia vu tien do`): chỉ xác định tuân thủ theo báo cáo NĂM — bản ghi ở kỳ QUÝ của nhóm này bị loại khỏi mọi tính toán (tra `dm_ky_bao_cao.loai_ky` theo từng `ky_key`, không dựa trực tiếp `nghia_vu_id` vì đó chỉ là snapshot lịch sử tại thời điểm ghi nhận).
-  - Nhóm "Nộp báo cáo định kỳ" (`Bao cao dinh ky`): NGƯỢC LẠI — lấy toàn bộ báo cáo đã nộp của dự án, không phân biệt quý/năm (hành vi mặc định, không cần lọc thêm — chỉ ghi lại để tránh nhầm đây cũng theo rule "chỉ NĂM" như nhóm Tiến độ).
+  - ~~Nhóm "Tiến độ" (`Nghia vu tien do`): chỉ xác định tuân thủ theo báo cáo NĂM — bản ghi ở kỳ QUÝ của nhóm này bị loại khỏi mọi tính toán (tra `dm_ky_bao_cao.loai_ky` theo từng `ky_key`, không dựa trực tiếp `nghia_vu_id` vì đó chỉ là snapshot lịch sử tại thời điểm ghi nhận).~~ — **ĐỔI LẠI (2026-08-18, theo yêu cầu nghiệp vụ mới của người dùng)**: nhóm "Tiến độ" giờ tính CẢ kỳ NĂM và kỳ QUÝ — bỏ hẳn nhánh lọc theo `loai_ky` trong `locNghiaVuHopLe` (constant đổi tên từ `NHOM_TIEN_DO_CHI_TINH_NAM` → `NHOM_TIEN_DO`). Chỉ áp dụng cho nhóm "Tiến độ" trong tab Tuân thủ này — KHÔNG đổi cơ chế `KyBaoCaoResolver.layNBaoCaoGanNhatCungLoaiKy` (vẫn "cùng loại kỳ với báo cáo gần nhất") dùng chung cho tab Tiến độ và các tab khác (Tổng quan, Tài chính, Vốn & Giải ngân, So sánh, Dự báo) — đã xác nhận rõ phạm vi với người dùng qua AskUserQuestion trước khi sửa.
+  - Nhóm "Nộp báo cáo định kỳ" (`Bao cao dinh ky`): lấy toàn bộ báo cáo đã nộp của dự án, không phân biệt quý/năm (hành vi mặc định, không cần lọc thêm). Từ 2026-08-18, nhóm "Tiến độ" ở trên cũng xử lý giống vậy — trước đó khác nhau (nhóm "Tiến độ" chỉ tính NĂM).
 - **(cập nhật 2026-08-12) Sheet công thức đổi số dòng + bổ sung công thức "Thực tế ghi nhận" cho 4/5 nhóm — đã code**:
   - File `Mô tả logic công thức.xlsx` xoá cột "Tên nghĩa vụ" (dòng 46 cũ) và đổi tên bảng thành **"Bảng chi tiết tuân thủ cam kết"**; sheet 1 giờ chỉ còn dòng 47 (Tên nhóm nghĩa vụ), 48 (Trạng thái), 49 (Thực tế ghi nhận). Dòng 49 nêu rõ công thức cho từng nhóm: "Quy định pháp luật..."/"Thủ tục đăng ký..." → mặc định `"Đạt yêu cầu theo quy định"`; "Tiến độ" → `bc_dinh_ky.tien_do_trang_thai + bc_dinh_ky.ky_key`; "Nộp báo cáo định kỳ" → tên báo cáo + thời gian nộp (công thức đánh giá Trạng thái của nhóm này tham chiếu tiếp sang sheet "Nhóm chỉ tiêu - chỉ tiêu" dòng 30: so `NgayNop` với hạn nộp bc — quý: trước 10 tháng đầu quý sau; năm: trước 31/3 năm sau).
   - Đối chiếu bằng script (parse seed SQL) thì **data mẫu KHÔNG khớp 2 công thức này**: 12/84 bản ghi "Nộp báo cáo định kỳ" và 25/91 bản ghi "Tiến độ" có `trang_thai`/`thuc_te_ghi_nhan` lưu sẵn trong `bc_tuan_thu_chi_tiet` sai lệch so với công thức tính từ field thật (`ngay_nop_bao_cao`/`tien_do_trang_thai` ở `bc_dinh_ky`) — seed gán 2 giá trị boilerplate độc lập, không theo công thức.
@@ -568,6 +594,76 @@ Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng 
   này ngay trong response của tab Gợi ý để tự quyết định enable/disable tab, không buộc phải gọi
   riêng tab Rủi ro trước.
 
+### Phase 4bis — Like/Dislike cho nhận định AI (bổ sung docx 2026-08-18) — **đã code DB/API + wiring 7/8 tab**
+
+Xem nghiệp vụ ở mục 2.2.l. Phần này **độc lập với Phase 5** (LLM client thật) — hoạt động được ngay
+với `ai_insight` đã có từ Phase 0, không phụ thuộc việc insight là rule-based fallback hay LLM thật
+(về mặt kỹ thuật record `ai_insight` là 1 dòng cụ thể dù nội dung do rule-based hay LLM sinh ra).
+
+**Thiết kế DB — bảng mới `ai_insight_phan_ung`** (entity `AiInsightPhanUng extends BaseAudit`, theo
+đúng convention `ptcb`, KHÔNG sửa `ai_insight` gốc):
+
+| Cột | Nguồn | Ghi chú |
+| --- | --- | --- |
+| `id` | PK identity | |
+| `ai_insight_id` | FK → `ai_insight.id` | |
+| `loai_phan_ung` | enum `LIKE`/`DISLIKE` (`LoaiPhanUngAiInsight`) | |
+| `id_nguoi_tao` | `BaseAudit`, immutable | **đóng vai trò "người đã phản ứng"** — không thêm cột riêng vì 1 user chỉ tạo/sửa đúng phản ứng của chính họ (không có khái niệm phản ứng thay người khác) |
+| `ngay_tao`/`id_nguoi_sua`/`nguoi_sua`/`ngay_sua` | `BaseAudit` | `ngay_sua` chính là `updated_at` mà docx yêu cầu ghi đè khi đánh giá lại |
+| `da_xoa` | `BaseAudit` | **tái dùng làm cờ "đã tắt (toggle off)"** — không phải xoá theo nghĩa thường; bấm lại sau khi tắt sẽ "undelete" (update lại dòng cũ), không tạo dòng mới, đúng yêu cầu docx |
+
+`UNIQUE(ai_insight_id, id_nguoi_tao)` (bất kể `da_xoa`) — đảm bảo tại mọi thời điểm 1 user có đúng
+0 hoặc 1 dòng cho 1 insight, cho phép toggle bằng update-in-place thay vì native upsert (đúng pattern
+find-existing → mutate → `repository.save()` đã dùng xuyên suốt module `ptcb`, xem `CbPhanHoi`/
+`CbNhomChiTieu`ServiceImpl — không dùng raw SQL upsert).
+
+**Đã code**: enum `com.ai.ptcb.domain.enumeration.LoaiPhanUngAiInsight` (LIKE/DISLIKE); entity
+`AiInsightPhanUng`; `AiInsightPhanUngRepository` (`findByAiInsightIdAndIdNguoiTao` — bao gồm cả
+`da_xoa=true` để phục vụ undelete; `findByAiInsightIdAndIdNguoiTaoAndDaXoaFalse` — chỉ phản ứng
+hiệu lực); `AiInsightPhanUngService`/`Impl` (logic toggle/chuyển đổi/undelete theo đúng 4 quy tắc ở
+mục 2.2.l, có unit test `AiInsightPhanUngServiceImplTest`); `AiInsightPhanUngController`
+(`PUT /api/v1/ptcb/ai-insight/{insightId}/phan-ung`, body `{ loaiPhanUng: "LIKE"|"DISLIKE" }`, trả
+`AiInsightPhanUngResponse{ aiInsightId, trangThai }` với `trangThai=null` nghĩa là vừa tắt). Chưa
+gắn `@Permission` (đúng hiện trạng chung của các controller `ptcb` khác). i18n key mới:
+`aiInsight.phanUng.loaiPhanUng.required`/`aiInsight.phanUng.insight.notFound`/
+`aiInsight.phanUng.update.success` (đã thêm cả 3 file `messages{,_vi,_en}.properties`).
+
+**Wiring vào 7 tab (2026-08-18, cùng ngày, sau khi người dùng chỉ ra response của các API
+`chi-tiet/tai-chinh`...`chi-tiet/du-bao` chưa trả trạng thái Like/Dislike) — đã code xong**:
+1. `AiInsightLookup.layNoiDung(reportId, tabNguon): Optional<String>` đổi thành
+   **`layInsight(reportId, tabNguon): Optional<AiInsightNoiDung>`** (record mới, gồm `insightId` +
+   `noiDung`) — đổi thẳng interface (breaking change nội bộ, không giữ overload cũ vì chỉ có 1 impl
+   + không có test nào phụ thuộc chữ ký cũ).
+2. DTO dùng chung mới `NhanDinhAiResponse` (`insightId`, `noiDung`, `phanUngCuaToi`) — thay cho field
+   `String nhanDinh` cũ ở **7 response** (`TabTaiChinhResponse`, `TabVonGiaiNganResponse`,
+   `TabTienDoResponse`, `TabRuiRoResponse`, `SoSanhDaChiTieuResponse`, `SoSanhNganhResponse`,
+   `TabDuBaoResponse` — **không phải 8**, xem điểm 4 dưới). 2 static factory: `tuInsight(...)` (có
+   `insightId` thật, kèm gọi `AiInsightPhanUngService.layTrangThaiHienTai(insightId)` để điền
+   `phanUngCuaToi`) và `ruleBased(...)` (fallback, `insightId`/`phanUngCuaToi` = `null`). Mỗi
+   `*ServiceImpl` tương ứng inject thêm `AiInsightPhanUngService`, `sinhNhanDinh(...)` đổi kiểu trả
+   về từ `String` sang `NhanDinhAiResponse`. **Đây LÀ breaking change JSON** (`nhanDinh` từ string
+   phẳng thành object `{noiDung, insightId, phanUngCuaToi}`) — chấp nhận được vì feature còn đang
+   phát triển (docx like/unlike vừa thêm cùng ngày), FE chưa có bản chốt tích hợp cũ nào phải giữ
+   tương thích.
+3. `TabGoiYServiceImpl#xayDungGoiYTongQuat` (tái dùng `TabRuiRoResponse.getNhanDinh()` làm
+   `moTaChiTiet` cho card "Rủi ro" tổng quát) sửa theo cho khớp kiểu mới
+   (`ruiRo.getNhanDinh().getNoiDung()`).
+4. **Tab Gợi ý (`TabGoiYResponse`) CHỦ ĐỘNG KHÔNG đổi** — "Nội dung nhận định" của tab này (thẻ tổng
+   hợp đầu tab, đếm số gợi ý Cao/Nghiêm trọng) đã quyết định từ trước là **Rule-based thuần, không
+   tra `ai_insight`** (xem mục "Tab 'Gợi ý'" ở Phase 4) — nghĩa là KHÔNG có `ai_insight.id` nào để
+   gắn Like/Dislike, dù docx 2026-08-18 lại gắn UI Like/Dislike ngay tại đúng vị trí này (mục 2.2.l).
+   Đây là **mâu thuẫn thiết kế chưa xử lý** — chưa đổi `TabGoiYResponse` field tương ứng, chưa hỏi
+   BA. Hướng khả thi (chưa chọn): (a) đổi tab Gợi ý sang có 1 `ai_insight` thật (tab_nguon="goi_y",
+   dù nội dung vẫn rule-based) chỉ để có id gắn phản ứng, hoặc (b) disable nút Like/Dislike ở đúng
+   card này trên FE, giữ nguyên rule-based không insight.
+5. **Case insight chưa tồn tại (đang fallback rule-based, job async Phase 5/mục 2.2 điểm 2 chưa chạy
+   tới)**: `NhanDinhAiResponse.ruleBased(...)` trả `insightId=null` — FE nên disable nút Like/Dislike
+   khi gặp `insightId == null` (docx không đề cập case này, đây là suy luận hợp lý, chưa chốt BA).
+6. Khi job async sinh insight MỚI cho cùng `(report_id, tab_nguon)` (regenerate, VD do `expired_at`)
+   → `ai_insight.id` mới → mọi phản ứng cũ (gắn theo `insight_id` cũ) không còn hiển thị cho bản ghi
+   mới. Đây là hệ quả tự nhiên của thiết kế (phản ứng gắn với 1 nội dung nhận định CỤ THỂ, không
+   phải với "khái niệm" tab+kỳ), không phải bug — ghi nhận lại để tránh hiểu nhầm là dữ liệu bị mất.
+
 ### Phase 5 — LLM insight client dùng chung
 
 - Xác nhận `AiServiceClient` có hỗ trợ prompt tự do; nếu không, thêm client mới theo pattern hiện có.
@@ -582,6 +678,8 @@ Tiếp tục trong module `ptcb`, dùng `BaseAudit` + tên bảng/cột tiếng 
 - Phase 0–2 là nền tảng bắt buộc, không thể song song.
 - Phase 3 có thể chia nhỏ, làm song song theo từng nhóm chỉ tiêu — nhưng 2 điểm mở (Vốn khác, 2/4 trạng thái tiến độ) nên chốt với BA trước khi bắt đầu để tránh phải sửa lại UI/logic.
 - Phase 4 rủi ro cao nhất về hiệu năng/độ chính xác — làm sau cùng, sau khi mục 4 đã chốt.
+- Phase 4bis độc lập với Phase 5 (không cần LLM client thật) — phần DB/API dùng chung đã xong, có
+  thể làm việc wiring vào 8 tab bất cứ lúc nào, không cần chờ Phase 5.
 - Phase 6 làm cuối vì phụ thuộc toàn bộ data của các tab khác đã ổn định.
 
 ## 6. Ngoài phạm vi (đã xác nhận với người dùng)
